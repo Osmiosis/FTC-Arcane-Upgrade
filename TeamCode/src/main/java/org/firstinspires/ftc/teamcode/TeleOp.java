@@ -428,8 +428,8 @@ public class TeleOp extends OpMode {
         }
 
         public void update(Gamepad gamepad) {
-            double drive  = gamepad.left_stick_y;
-            double strafe = -gamepad.left_stick_x;
+            double drive  = -gamepad.left_stick_y;
+            double strafe = +gamepad.left_stick_x;
             double twist  = -gamepad.right_stick_x;
 
             // Apply scaled deadzone to ignore small stick movements while preserving smooth control
