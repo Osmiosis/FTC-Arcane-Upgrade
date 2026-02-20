@@ -237,12 +237,21 @@ public class TeleOp extends OpMode {
         telemetry.addLine();
         telemetry.addData("Shooter Ready", shooterReady ? "YES" : "NO");
         String shooterIntakeStatus = shooterIntake.getPower() > 0 ? "RUNNING" :
-                             shooterIntake.getPower() < 0 ? "REVERSE" : "STOPPED";
+                shooterIntake.getPower() < 0 ? "REVERSE" : "STOPPED";
         telemetry.addData("Shooter Intake", shooterIntakeStatus);
 
         // Display Main Intake Telemetry
         telemetry.addLine();
+        //String mainIntakeStatus = mainIntake.getPower() > 0 ? "ON" :
+        //mainIntake.getPower() < 0 ? "REVERSE" : "OFF";
+        //telemetry.addData("Main Intake", mainIntakeStatus);
         telemetry.addData("Intake Toggle State", mainIntakeOn ? "ON" : "OFF");
+
+        // Display Climb Telemetry
+        telemetry.addLine();
+        //String climbStatus = climb.getPower() > 0 ? "UP" :
+        //climb.getPower() < 0 ? "DOWN" : "STOPPED";
+        //telemetry.addData("Climb", climbStatus);
 
         // Display Controls
         telemetry.addLine();
@@ -399,7 +408,7 @@ public class TeleOp extends OpMode {
         }
 
         public void update(Gamepad gamepad) {
-            double drive  = gamepad.left_stick_y;
+            double drive  = +gamepad.left_stick_y;
             double strafe = -gamepad.left_stick_x;
             double twist  = -gamepad.right_stick_x;
 
@@ -410,6 +419,7 @@ public class TeleOp extends OpMode {
             twist = applyScaledDeadzone(twist, Constants.JOYSTICK_DEADZONE);
 
             // Apply non-linear scaling for finer control (preserve sign)
+            drive = Math.copySign(Math.pow(Math.abs(drive), Constants.DRIVE_SCALE_POWER), drive);
             drive = Math.copySign(Math.pow(Math.abs(drive), Constants.DRIVE_SCALE_POWER), drive);
             strafe = Math.copySign(Math.pow(Math.abs(strafe), Constants.DRIVE_SCALE_POWER), strafe);
             twist = Math.copySign(Math.pow(Math.abs(twist), Constants.DRIVE_SCALE_POWER), twist);
