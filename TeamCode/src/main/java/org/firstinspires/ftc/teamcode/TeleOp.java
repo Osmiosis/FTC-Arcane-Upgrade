@@ -5,11 +5,11 @@ import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.hardware.Gamepad;
+import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.vision.VisionPortal;
@@ -35,20 +35,16 @@ public class TeleOp extends OpMode {
     private boolean mainIntakeOn = false;
     private boolean xButtonPreviouslyPressed = false;
 
-    // AprilTag alignment (LB held)
+    // AprilTag alignment (LB held) — simple PD controller
     private AprilTagProcessor aprilTag;
     private VisionPortal visionPortal;
     private boolean lbPreviouslyPressed = false;
 
-    // Camera offset from the shooter centerline (fill in after measuring)
-    private static final double CAMERA_OFFSET_X = 0.0; // inches, positive = camera is to the right of shooter
-
-    // Alignment gains — tune these for your robot
-    private static final double TURN_GAIN   = 0.02;  // turn power per degree of bearing error
-    private static final double STRAFE_GAIN = 0.02;  // strafe power per degree of yaw error
-    private static final double MAX_TURN    = 0.4;
-    private static final double MAX_STRAFE  = 0.4;
-
+    // PD controller state
+    private double alignError     = 0;
+    private double alignLastError = 0;
+    private double alignCurTime   = 0;
+    private double alignLastTime  = 0;
 
     @Override
     public void init() {
@@ -76,8 +72,7 @@ public class TeleOp extends OpMode {
         blockServo = hardwareMap.get(Servo.class, "Block");
         blockServo.setPosition(0); // Start in closed position
 
-        // Initialize AprilTag processor (camera faces backward with shooter)
-        // C920 has built-in SDK calibration at 800x600 — no manual calibration needed
+        // Initialize AprilTag processor — stream suspended until LB is pressed (saves CPU)
         aprilTag = new AprilTagProcessor.Builder().build();
         aprilTag.setDecimation(2);
         visionPortal = new VisionPortal.Builder()
@@ -85,10 +80,7 @@ public class TeleOp extends OpMode {
                 .setCameraResolution(new android.util.Size(800, 600))
                 .addProcessor(aprilTag)
                 .build();
-        // Wait for camera to finish opening, then suspend to save CPU until LB is pressed
-        while (visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING) {
-            // yield — init() blocks here briefly until camera is ready
-        }
+        while (visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING) { /* wait */ }
         visionPortal.stopStreaming();
 
         telemetry.addData("Status", "Initialized");
@@ -103,60 +95,69 @@ public class TeleOp extends OpMode {
 
     @Override
     public void start() {
+        resetRuntime();
+        alignCurTime = getRuntime();
     }
 
     @Override
     public void loop() {
-        // ── AprilTag alignment (LB) ──────────────────────────────────────────
+        // ── AprilTag alignment (LB held) ──────────────────────────────────────
         boolean lbHeld = gamepad1.left_bumper;
 
-        // Start/stop camera stream on LB edge to save CPU
+        // Resume/stop camera stream on LB edge to save CPU
         if (lbHeld && !lbPreviouslyPressed) {
             visionPortal.resumeStreaming();
+            alignLastError = 0;
+            alignLastTime  = getRuntime();
         } else if (!lbHeld && lbPreviouslyPressed) {
             visionPortal.stopStreaming();
-            drive.stop(); // clear any alignment powers and reset slew limiters
+            alignLastError = 0;
+            alignLastTime  = getRuntime();
         }
         lbPreviouslyPressed = lbHeld;
 
+        // Gamepad drive inputs (used in both modes; rotate may be overridden in align mode)
+        double forward = -gamepad1.left_stick_y;
+        double strafe  =  gamepad1.left_stick_x;
+        double rotate  =  gamepad1.right_stick_x;
+
         if (lbHeld) {
-            // --- AprilTag alignment mode: TURN + STRAFE to face the tag ---
-            // Goal: rotate the robot so the shooter (rear) faces the tag,
-            //       then strafe to put the shooter centerline directly on the tag.
-            // No forward/backward drive — we never approach the tag.
-            AprilTagDetection target = getBestTag();
+            // Simple PD bearing alignment.
+            // Camera faces BACKWARD (same direction as shooter).
+            // Negate bearing so the robot turns the correct way to put the shooter on target.
+            List<AprilTagDetection> detections = aprilTag.getDetections();
+            AprilTagDetection target = null;
+            for (AprilTagDetection d : detections) {
+                if (d.metadata != null) { target = d; break; }
+            }
 
             if (target != null) {
-                // bearing: degrees left(+) or right(-) the tag is from the camera's center axis.
-                // Camera faces BACKWARD, so a positive bearing (tag left of camera) means
-                // the tag is actually to the RIGHT of the shooter → robot must turn RIGHT (positive turn).
-                double bearingError = target.ftcPose.bearing; // degrees
-                double rangeInches  = target.ftcPose.range;   // inches
+                double bearing = -target.ftcPose.bearing; // negate for rear-facing camera
+                alignError = Constants.ALIGN_GOAL_BEARING - bearing;
 
-                // Apply camera offset correction: convert physical X/Y offset (inches) to
-                // an equivalent angular offset at this range, then subtract it out so the
-                // shooter centerline (not the lens) is what aligns to the tag.
-                double offsetBearingCorrection = (rangeInches > 0)
-                        ? Math.toDegrees(Math.atan2(CAMERA_OFFSET_X, rangeInches)) : 0;
-                double correctedBearing = bearingError - offsetBearingCorrection;
+                if (Math.abs(alignError) < Constants.ALIGN_ANGLE_TOLERANCE) {
+                    rotate = 0;
+                } else {
+                    double pTerm = alignError * Constants.ALIGN_KP;
+                    alignCurTime = getRuntime();
+                    double dt    = alignCurTime - alignLastTime;
+                    double dTerm = (dt > 0) ? ((alignError - alignLastError) / dt) * Constants.ALIGN_KD : 0;
+                    rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
+                    alignLastError = alignError;
+                    alignLastTime  = alignCurTime;
+                }
 
-                // Turn: camera is backward → negate so positive bearing turns the shooter toward tag.
-                // Strafe: lateral offset of tag = range * sin(bearing). Correct for camera X offset too.
-                double lateralOffset = rangeInches * Math.sin(Math.toRadians(correctedBearing)) - CAMERA_OFFSET_X;
-
-                double turn   = Math.max(-MAX_TURN,   Math.min(MAX_TURN,    correctedBearing * TURN_GAIN));
-                double strafe = Math.max(-MAX_STRAFE,  Math.min(MAX_STRAFE, -lateralOffset    * STRAFE_GAIN));
-
-                drive.setRobotCentric(0, strafe, turn);
-
-                telemetry.addData("AprilTag", "Aligning  ID:%d  Bearing:%.1f°  Lateral:%.2f\"",
-                        target.id, correctedBearing, lateralOffset);
-                telemetry.addData("Align Powers", "Turn:%.3f  Strafe:%.3f", turn, strafe);
+                telemetry.addData("AprilTag", "Aligning  ID:%d  Bearing:%.1f°  Error:%.2f°",
+                        target.id, target.ftcPose.bearing, alignError);
+                telemetry.addData("Align Rotate", "%.3f", rotate);
             } else {
-                // No tag visible — hold still, keep trying
-                drive.stop();
+                rotate         = 0;
+                alignLastError = 0;
+                alignLastTime  = getRuntime();
                 telemetry.addData("AprilTag", "Searching... (no tag detected)");
             }
+
+            drive.setRobotCentric(forward, strafe, rotate);
         } else {
             // Normal manual drive — all sticks active
             drive.update(gamepad1);
@@ -193,21 +194,16 @@ public class TeleOp extends OpMode {
         }
 
         // Main Intake Control - Toggle with X button, Emergency reverse with B
-        // Detect X button press (edge detection)
         if (gamepad1.x && !xButtonPreviouslyPressed) {
-            mainIntakeOn = !mainIntakeOn;  // Toggle state
+            mainIntakeOn = !mainIntakeOn;
         }
         xButtonPreviouslyPressed = gamepad1.x;
 
-        // Apply power based on state and emergency override
         if (gamepad1.b) {
-            // Emergency reverse overrides everything
             //mainIntake.setPower(-Constants.MAIN_INTAKE_POWER);
         } else if (mainIntakeOn) {
-            // Normal operation when toggled on
             //mainIntake.setPower(Constants.MAIN_INTAKE_POWER);
         } else {
-            // Off
             //mainIntake.setPower(0);
         }
 
@@ -246,21 +242,12 @@ public class TeleOp extends OpMode {
 
         // Display Main Intake Telemetry
         telemetry.addLine();
-        //String mainIntakeStatus = mainIntake.getPower() > 0 ? "ON" :
-                                 //mainIntake.getPower() < 0 ? "REVERSE" : "OFF";
-        //telemetry.addData("Main Intake", mainIntakeStatus);
         telemetry.addData("Intake Toggle State", mainIntakeOn ? "ON" : "OFF");
-
-        // Display Climb Telemetry
-        telemetry.addLine();
-        //String climbStatus = climb.getPower() > 0 ? "UP" :
-                            //climb.getPower() < 0 ? "DOWN" : "STOPPED";
-        //telemetry.addData("Climb", climbStatus);
 
         // Display Controls
         telemetry.addLine();
         telemetry.addData("Controls", "Left Stick: Drive/Strafe | Right Stick: Turn");
-        telemetry.addData("AprilTag Align", "LB: Hold to align shooter to tag");
+        telemetry.addData("AprilTag Align", "LB: Hold to align shooter to tag (PD)");
         telemetry.addData("Shooter", "Right Trigger: Activate");
         telemetry.addData("Shooter Intake", "DPad Up: Feed | DPad Down: REVERSE");
         telemetry.addData("Main Intake", "X: Toggle ON/OFF | B: REVERSE");
@@ -287,22 +274,6 @@ public class TeleOp extends OpMode {
     @Override
     public void stop() {
         visionPortal.close();
-    }
-
-    /**
-     * Returns the best (closest) AprilTag detection, or null if none found.
-     */
-    private AprilTagDetection getBestTag() {
-        List<AprilTagDetection> detections = aprilTag.getDetections();
-        AprilTagDetection best = null;
-        for (AprilTagDetection d : detections) {
-            if (d.metadata != null) {
-                if (best == null || d.ftcPose.range < best.ftcPose.range) {
-                    best = d;
-                }
-            }
-        }
-        return best;
     }
 
     // ========================== INNER CLASSES ==========================
