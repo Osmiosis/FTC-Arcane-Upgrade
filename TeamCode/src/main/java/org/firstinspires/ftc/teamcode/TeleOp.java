@@ -420,7 +420,6 @@ public class TeleOp extends OpMode {
 
             // Apply non-linear scaling for finer control (preserve sign)
             drive = Math.copySign(Math.pow(Math.abs(drive), Constants.DRIVE_SCALE_POWER), drive);
-            drive = Math.copySign(Math.pow(Math.abs(drive), Constants.DRIVE_SCALE_POWER), drive);
             strafe = Math.copySign(Math.pow(Math.abs(strafe), Constants.DRIVE_SCALE_POWER), strafe);
             twist = Math.copySign(Math.pow(Math.abs(twist), Constants.DRIVE_SCALE_POWER), twist);
 
