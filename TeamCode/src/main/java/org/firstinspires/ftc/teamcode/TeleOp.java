@@ -37,13 +37,9 @@ public class TeleOp extends OpMode {
     private AprilTagProcessor aprilTag;
     private VisionPortal visionPortal;
 
-    // PD controller variables (exact same as YouTube tutorial)
-    private double kP = 0.002;
-    private double kD = 0.0001;
+    // PD controller state
     private double error = 0;
     private double lastError = 0;
-    private double goalX = 0;
-    private double angleTolerance = 0.2;
     private double curTime = 0;
     private double lastTime = 0;
 
@@ -161,17 +157,17 @@ public class TeleOp extends OpMode {
         if (aprilTagOn) {
             if (id20 != null) {
                 // Camera faces BACKWARD → negate bearing
-                error = goalX - (-id20.ftcPose.bearing);
+                error = Constants.ALIGN_GOAL_BEARING - (-id20.ftcPose.bearing);
 
-                if (Math.abs(error) < angleTolerance) {
+                if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
                     rotate = 0;
                 } else {
-                    double pTerm = error * kP;
+                    double pTerm = error * Constants.ALIGN_KP;
                     curTime = getRuntime();
                     double dt = curTime - lastTime;
-                    double dTerm = ((error - lastError) / dt) * kD;
+                    double dTerm = ((error - lastError) / dt) * Constants.ALIGN_KD;
 
-                    rotate = Range.clip(pTerm + dTerm, -0.4, 0.4);
+                    rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
 
                     lastError = error;
                     lastTime = curTime;
