@@ -6,7 +6,6 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
-import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.util.Range;
@@ -16,8 +15,8 @@ import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 
-import java.util.List;
 import java.util.Arrays;
+import java.util.List;
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOp", group = "TeleOp")
 public class TeleOp extends OpMode {
@@ -29,16 +28,13 @@ public class TeleOp extends OpMode {
     private DcMotorEx shooterMotor1;
     private DcMotorEx shooterMotor2;
     private DcMotor shooterIntake;
-    private Servo blockServo;
+    private DcMotor slideMotor;
 
-    // Toggle state for main intake
-    private boolean mainIntakeOn = false;
-    private boolean xButtonPreviouslyPressed = false;
-
-    // AprilTag alignment (LB held) — simple PD controller
+    // AprilTag alignment (A toggle) — simple PD controller
     private AprilTagProcessor aprilTag;
     private VisionPortal visionPortal;
-    private boolean lbPreviouslyPressed = false;
+    private boolean aprilTagOn = false;
+    private boolean aPreviouslyPressed = false;
 
     // PD controller state
     private double alignError     = 0;
@@ -68,11 +64,12 @@ public class TeleOp extends OpMode {
         shooterIntake = hardwareMap.get(DcMotor.class, "shooter_intake");
         shooterIntake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // Initialize Block Servo
-        blockServo = hardwareMap.get(Servo.class, "Block");
-        blockServo.setPosition(0); // Start in closed position
+        // Initialize Slide Motor
+        slideMotor = hardwareMap.get(DcMotor.class, "slide");
+        slideMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // Initialize AprilTag processor — stream suspended until LB is pressed (saves CPU)
+
+        // Initialize AprilTag processor — stream suspended until A is toggled on (saves CPU)
         aprilTag = new AprilTagProcessor.Builder().build();
         aprilTag.setDecimation(2);
         visionPortal = new VisionPortal.Builder()
@@ -87,9 +84,8 @@ public class TeleOp extends OpMode {
         telemetry.addData("Drive", "Ready");
         telemetry.addData("Shooter", "Ready");
         telemetry.addData("Shooter Intake", "Ready");
-        telemetry.addData("Main Intake", "Ready");
-        telemetry.addData("Climb", "Ready");
-        telemetry.addData("AprilTag", "Ready (LB to align)");
+        telemetry.addData("Slide", "Ready");
+        telemetry.addData("AprilTag", "Ready (A to align)");
         telemetry.update();
     }
 
@@ -101,27 +97,30 @@ public class TeleOp extends OpMode {
 
     @Override
     public void loop() {
-        // ── AprilTag alignment (LB held) ──────────────────────────────────────
-        boolean lbHeld = gamepad1.left_bumper;
+        // ── AprilTag alignment (A toggle) ─────────────────────────────────────
+        boolean aPressed = gamepad1.a;
 
-        // Resume/stop camera stream on LB edge to save CPU
-        if (lbHeld && !lbPreviouslyPressed) {
-            visionPortal.resumeStreaming();
-            alignLastError = 0;
-            alignLastTime  = getRuntime();
-        } else if (!lbHeld && lbPreviouslyPressed) {
-            visionPortal.stopStreaming();
-            alignLastError = 0;
-            alignLastTime  = getRuntime();
+        // Toggle aprilTagOn on A button press edge
+        if (aPressed && !aPreviouslyPressed) {
+            aprilTagOn = !aprilTagOn;
+            if (aprilTagOn) {
+                visionPortal.resumeStreaming();
+                alignLastError = 0;
+                alignLastTime  = getRuntime();
+            } else {
+                visionPortal.stopStreaming();
+                alignLastError = 0;
+                alignLastTime  = getRuntime();
+            }
         }
-        lbPreviouslyPressed = lbHeld;
+        aPreviouslyPressed = aPressed;
 
-        // Gamepad drive inputs (used in both modes; rotate may be overridden in align mode)
+        // Gamepad drive inputs (rotate may be overridden in align mode)
         double forward = -gamepad1.left_stick_y;
         double strafe  =  gamepad1.left_stick_x;
         double rotate  =  gamepad1.right_stick_x;
 
-        if (lbHeld) {
+        if (aprilTagOn) {
             // Simple PD bearing alignment.
             // Camera faces BACKWARD (same direction as shooter).
             // Negate bearing so the robot turns the correct way to put the shooter on target.
@@ -164,58 +163,36 @@ public class TeleOp extends OpMode {
         }
         // ─────────────────────────────────────────────────────────────────────
 
-        // Update Shooter: trigger sets target velocity, PID always runs
+        // Update Shooter: right trigger sets target velocity, PID always runs
         if (gamepad1.right_trigger > Constants.TRIGGER_DEADZONE) {
             shooter.setTarget(Constants.SHOOTER_TARGET);
         } else {
-            shooter.setTarget(0);  // Stop shooter when trigger released
+            shooter.setTarget(0);
         }
         shooter.update();
 
-        // Block Servo Control - Only opens when trigger is held AND shooter is within tolerance of target speed
-        boolean shooterTriggered = gamepad1.right_trigger > Constants.TRIGGER_DEADZONE;
-        double shooterError = Math.abs(shooter.getError());
-        if (shooterTriggered && shooterError <= Constants.SHOOTER_READY_TOLERANCE) {
-            blockServo.setPosition(1); // Open
-        } else {
-            blockServo.setPosition(0); // Closed
-        }
 
-        // Shooter Intake Control - Only runs when dpad_up is held AND shooter is at speed
-        // Emergency reverse with dpad_down
-        boolean shooterReady = Math.abs(shooter.getError()) <= Constants.SHOOTER_READY_TOLERANCE;
-        if (gamepad1.dpad_up && shooterReady) {
+        // Shooter Intake Control (hold only)
+        // Left Trigger: run forward | Left Bumper: run in reverse
+        if (gamepad1.left_trigger > Constants.TRIGGER_DEADZONE) {
             shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-        } else if (gamepad1.dpad_down) {
-            // Emergency reverse - no shooter ready check
+        } else if (gamepad1.left_bumper) {
             shooterIntake.setPower(-Constants.SHOOTER_INTAKE_POWER);
         } else {
             shooterIntake.setPower(0);
         }
 
-        // Main Intake Control - Toggle with X button, Emergency reverse with B
-        if (gamepad1.x && !xButtonPreviouslyPressed) {
-            mainIntakeOn = !mainIntakeOn;
-        }
-        xButtonPreviouslyPressed = gamepad1.x;
-
-        if (gamepad1.b) {
-            //mainIntake.setPower(-Constants.MAIN_INTAKE_POWER);
-        } else if (mainIntakeOn) {
-            //mainIntake.setPower(Constants.MAIN_INTAKE_POWER);
+        // Slide Control (hold only)
+        // DPad Up: extend | DPad Down: retract
+        if (gamepad1.dpad_up) {
+            slideMotor.setPower(Constants.SLIDE_POWER);
+        } else if (gamepad1.dpad_down) {
+            slideMotor.setPower(-Constants.SLIDE_POWER);
         } else {
-            //mainIntake.setPower(0);
+            slideMotor.setPower(0);
         }
 
-        // Climb Control - Y button (up), A button (down)
-        if (gamepad1.y) {
-            //climb.setPower(Constants.CLIMB_POWER);
-        } else if (gamepad1.a) {
-            //climb.setPower(-Constants.CLIMB_POWER);
-        } else {
-        }
-
-        // Display Drive Telemetry
+        // ── Telemetry ────────────────────────────────────────────────────────
         double[] motorPowers = drive.getMotorPowers();
         telemetry.addData("Status", "Running");
         telemetry.addLine();
@@ -223,7 +200,6 @@ public class TeleOp extends OpMode {
         telemetry.addData("Drive Motors", "FL:%.2f FR:%.2f BL:%.2f BR:%.2f",
                 motorPowers[0], motorPowers[1], motorPowers[2], motorPowers[3]);
 
-        // Display Shooter Telemetry
         telemetry.addLine();
         double[] velocities = shooter.getMotorVelocities();
         telemetry.addData("Shooter Target", "%.0f ticks/sec", Constants.SHOOTER_TARGET);
@@ -231,40 +207,29 @@ public class TeleOp extends OpMode {
         telemetry.addData("Shooter Error", "%.0f", shooter.getError());
         telemetry.addData("Shooter Power", "%.3f", shooter.getOutput());
         telemetry.addData("At Target", shooter.atTarget() ? "YES" : "NO");
-        telemetry.addData("Block Servo", blockServo.getPosition() == 1 ? "OPEN" : "CLOSED");
 
-        // Display Shooter Intake Telemetry
         telemetry.addLine();
+        boolean shooterReady = Math.abs(shooter.getError()) <= Constants.SHOOTER_READY_TOLERANCE;
         telemetry.addData("Shooter Ready", shooterReady ? "YES" : "NO");
         String shooterIntakeStatus = shooterIntake.getPower() > 0 ? "RUNNING" :
                 shooterIntake.getPower() < 0 ? "REVERSE" : "STOPPED";
         telemetry.addData("Shooter Intake", shooterIntakeStatus);
 
-        // Display Main Intake Telemetry
         telemetry.addLine();
-        //String mainIntakeStatus = mainIntake.getPower() > 0 ? "ON" :
-        //mainIntake.getPower() < 0 ? "REVERSE" : "OFF";
-        //telemetry.addData("Main Intake", mainIntakeStatus);
-        telemetry.addData("Intake Toggle State", mainIntakeOn ? "ON" : "OFF");
+        String slideStatus = slideMotor.getPower() > 0 ? "UP" :
+                slideMotor.getPower() < 0 ? "DOWN" : "STOPPED";
+        telemetry.addData("Slide", slideStatus);
 
-        // Display Climb Telemetry
-        telemetry.addLine();
-        //String climbStatus = climb.getPower() > 0 ? "UP" :
-        //climb.getPower() < 0 ? "DOWN" : "STOPPED";
-        //telemetry.addData("Climb", climbStatus);
-
-        // Display Controls
         telemetry.addLine();
         telemetry.addData("Controls", "Left Stick: Drive/Strafe | Right Stick: Turn");
-        telemetry.addData("AprilTag Align", "LB: Hold to align shooter to tag (PD)");
+        telemetry.addData("AprilTag Align", "A: Toggle align (ON: " + (aprilTagOn ? "YES" : "NO") + ")");
         telemetry.addData("Shooter", "Right Trigger: Activate");
-        telemetry.addData("Shooter Intake", "DPad Up: Feed | DPad Down: REVERSE");
-        telemetry.addData("Main Intake", "X: Toggle ON/OFF | B: REVERSE");
-        telemetry.addData("Climb", "Y: UP | A: DOWN");
+        telemetry.addData("Shooter Intake", "Left Trigger: Feed | Left Bumper: REVERSE");
+        telemetry.addData("Slide", "DPad Up: Extend | DPad Down: Retract");
 
         telemetry.update();
 
-        // Send data to FTC Dashboard for graphing
+        // Send data to FTC Dashboard
         TelemetryPacket packet = new TelemetryPacket();
         double[] shooterVelocities = shooter.getMotorVelocities();
         double currentSpeed = (shooterVelocities[0] + shooterVelocities[1]) / 2.0;
@@ -275,7 +240,6 @@ public class TeleOp extends OpMode {
         packet.put("Shooter Motor 2 Speed", shooterVelocities[1]);
         packet.put("Shooter Error", shooter.getError());
         packet.put("Shooter Power Output", shooter.getOutput());
-        packet.put("Block Servo Position", blockServo.getPosition());
 
         dashboard.sendTelemetryPacket(packet);
     }

@@ -31,6 +31,9 @@ public class Constants {
     // Climb Configuration
     public static double CLIMB_POWER = 1.0;               // Power for climb motor
 
+    // Slide Configuration
+    public static double SLIDE_POWER = 1.0;               // Power for slide motor (dpad up/down)
+
     // AprilTag Auto-Align (PD controller, activated by LB)
     public static double ALIGN_KP = 0.002;                // Proportional gain for bearing alignment
     public static double ALIGN_KD = 0.0001;               // Derivative gain for bearing alignment
