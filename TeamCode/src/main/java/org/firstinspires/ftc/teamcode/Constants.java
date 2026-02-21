@@ -35,8 +35,8 @@ public class Constants {
     public static double SLIDE_POWER = 1.0;               // Power for slide motor (dpad up/down)
 
     // AprilTag Auto-Align (PD controller, activated by LB)
-    public static double ALIGN_KP = 0.002;                // Proportional gain for bearing alignment
-    public static double ALIGN_KD = 0.0001;               // Derivative gain for bearing alignment
+    public static double ALIGN_KP = 0.01;                // Proportional gain for bearing alignment
+    public static double ALIGN_KD = 0;               // Derivative gain for bearing alignment
     public static double ALIGN_GOAL_BEARING = 0.0;        // Target bearing (degrees) — 0 = tag straight ahead of shooter
     public static double ALIGN_ANGLE_TOLERANCE = 0.2;     // Bearing tolerance (degrees) before stopping rotation
     public static double ALIGN_MAX_ROTATE = 0.4;          // Max rotate power during alignment
