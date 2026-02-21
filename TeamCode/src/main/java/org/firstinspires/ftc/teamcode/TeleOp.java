@@ -5,22 +5,15 @@ import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.HardwareMap;
-import com.qualcomm.robotcore.util.ElapsedTime;
-import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.util.Range;
 
-import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
-import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
-import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
-
-import java.util.Arrays;
-import java.util.List;
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOp", group = "TeleOp")
 public class TeleOp extends OpMode {
 
+    // ── Subsystems ──
+    private final AprilTagWebcam aprilTagWebcam = new AprilTagWebcam();
     private MecanumDrive drive;
     private ShooterPID shooter;
     private FtcDashboard dashboard;
@@ -30,22 +23,26 @@ public class TeleOp extends OpMode {
     private DcMotor shooterIntake;
     private DcMotor slideMotor;
 
-    // AprilTag alignment (A toggle) — simple PD controller
-    private AprilTagProcessor aprilTag;
-    private VisionPortal visionPortal;
+    // ── AprilTag PD controller variables (matches YouTube tutorial) ──
+    private double error = 0;
+    private double lastError = 0;
+    private double curTime = 0;
+    private double lastTime = 0;
+
+    // AprilTag toggle state
     private boolean aprilTagOn = false;
     private boolean aPreviouslyPressed = false;
 
-    // PD controller state
-    private double alignError     = 0;
-    private double alignLastError = 0;
-    private double alignCurTime   = 0;
-    private double alignLastTime  = 0;
+    // Drive inputs
+    private double forward, strafe, rotate;
 
     @Override
     public void init() {
-        // Initialize FTC Dashboard for graphing
+        // Initialize FTC Dashboard
         dashboard = FtcDashboard.getInstance();
+
+        // Initialize AprilTag webcam (streams to FTC Dashboard automatically)
+        aprilTagWebcam.init(hardwareMap, telemetry);
 
         // Initialize Mecanum Drive
         drive = new MecanumDrive(hardwareMap);
@@ -68,102 +65,83 @@ public class TeleOp extends OpMode {
         slideMotor = hardwareMap.get(DcMotor.class, "slide");
         slideMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-
-        // Initialize AprilTag processor — stream suspended until A is toggled on (saves CPU)
-        aprilTag = new AprilTagProcessor.Builder().build();
-        aprilTag.setDecimation(2);
-        visionPortal = new VisionPortal.Builder()
-                .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
-                .setCameraResolution(new android.util.Size(800, 600))
-                .addProcessor(aprilTag)
-                .build();
-        while (visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING) { /* wait */ }
-        visionPortal.stopStreaming();
-
         telemetry.addData("Status", "Initialized");
         telemetry.addData("Drive", "Ready");
         telemetry.addData("Shooter", "Ready");
         telemetry.addData("Shooter Intake", "Ready");
         telemetry.addData("Slide", "Ready");
-        telemetry.addData("AprilTag", "Ready (A to align)");
+        telemetry.addData("AprilTag", "Ready (A to toggle align)");
         telemetry.update();
     }
 
     @Override
     public void start() {
         resetRuntime();
-        alignCurTime = getRuntime();
+        curTime = getRuntime();
     }
 
     @Override
     public void loop() {
-        // ── AprilTag alignment (A toggle) ─────────────────────────────────────
-        boolean aPressed = gamepad1.a;
+        // ── Gamepad inputs ──
+        forward = -gamepad1.left_stick_y;
+        strafe  =  gamepad1.left_stick_x;
+        rotate  =  gamepad1.right_stick_x;
 
-        // Toggle aprilTagOn on A button press edge
+        // ── AprilTag toggle (A button rising edge) ──
+        boolean aPressed = gamepad1.a;
         if (aPressed && !aPreviouslyPressed) {
             aprilTagOn = !aprilTagOn;
-            if (aprilTagOn) {
-                visionPortal.resumeStreaming();
-                alignLastError = 0;
-                alignLastTime  = getRuntime();
-            } else {
-                visionPortal.stopStreaming();
-                alignLastError = 0;
-                alignLastTime  = getRuntime();
-            }
+            lastError = 0;
+            lastTime = getRuntime();
         }
         aPreviouslyPressed = aPressed;
 
-        // Gamepad drive inputs (rotate may be overridden in align mode)
-        double forward = -gamepad1.left_stick_y;
-        double strafe  =  gamepad1.left_stick_x;
-        double rotate  =  gamepad1.right_stick_x;
+        // ── AprilTag detection (always update so dashboard shows the feed) ──
+        aprilTagWebcam.update();
 
+        // ── Auto-align logic (copied from YouTube tutorial, with rear-camera negate) ──
         if (aprilTagOn) {
-            // Simple PD bearing alignment.
-            // Camera faces BACKWARD (same direction as shooter).
-            // Negate bearing so the robot turns the correct way to put the shooter on target.
-            List<AprilTagDetection> detections = aprilTag.getDetections();
-            AprilTagDetection target = null;
-            for (AprilTagDetection d : detections) {
-                if (d.metadata != null) { target = d; break; }
-            }
+            // Get first visible tag (or use getTagBySpecificId(20) for a specific one)
+            AprilTagDetection target = aprilTagWebcam.getFirstDetection();
 
             if (target != null) {
-                double bearing = -target.ftcPose.bearing; // negate for rear-facing camera
-                alignError = Constants.ALIGN_GOAL_BEARING - bearing;
+                // Camera faces BACKWARD → negate bearing so robot turns correctly
+                error = Constants.ALIGN_GOAL_BEARING - (-target.ftcPose.bearing);
 
-                if (Math.abs(alignError) < Constants.ALIGN_ANGLE_TOLERANCE) {
+                if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
                     rotate = 0;
                 } else {
-                    double pTerm = alignError * Constants.ALIGN_KP;
-                    alignCurTime = getRuntime();
-                    double dt    = alignCurTime - alignLastTime;
-                    double dTerm = (dt > 0) ? ((alignError - alignLastError) / dt) * Constants.ALIGN_KD : 0;
+                    double pTerm = error * Constants.ALIGN_KP;
+                    curTime = getRuntime();
+                    double dt = curTime - lastTime;
+                    double dTerm = ((error - lastError) / dt) * Constants.ALIGN_KD;
+
                     rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
-                    alignLastError = alignError;
-                    alignLastTime  = alignCurTime;
+
+                    lastError = error;
+                    lastTime = curTime;
                 }
 
                 telemetry.addData("AprilTag", "Aligning  ID:%d  Bearing:%.1f°  Error:%.2f°",
-                        target.id, target.ftcPose.bearing, alignError);
+                        target.id, target.ftcPose.bearing, error);
                 telemetry.addData("Align Rotate", "%.3f", rotate);
             } else {
-                rotate         = 0;
-                alignLastError = 0;
-                alignLastTime  = getRuntime();
+                lastTime = getRuntime();
+                lastError = 0;
                 telemetry.addData("AprilTag", "Searching... (no tag detected)");
             }
 
+            // Use setRobotCentric during alignment (bypasses slew rate limiting for precise control)
             drive.setRobotCentric(forward, strafe, rotate);
         } else {
-            // Normal manual drive — all sticks active
+            lastError = 0;
+            lastTime = getRuntime();
+
+            // Normal manual drive — all sticks active with slew rate limiting
             drive.update(gamepad1);
         }
-        // ─────────────────────────────────────────────────────────────────────
 
-        // Update Shooter: right trigger sets target velocity, PID always runs
+        // ── Shooter: right trigger sets target velocity ──
         if (gamepad1.right_trigger > Constants.TRIGGER_DEADZONE) {
             shooter.setTarget(Constants.SHOOTER_TARGET);
         } else {
@@ -171,8 +149,7 @@ public class TeleOp extends OpMode {
         }
         shooter.update();
 
-
-        // Shooter Intake Control (hold only)
+        // ── Shooter Intake (hold only) ──
         // Left Trigger: run forward | Left Bumper: run in reverse
         if (gamepad1.left_trigger > Constants.TRIGGER_DEADZONE) {
             shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
@@ -182,7 +159,7 @@ public class TeleOp extends OpMode {
             shooterIntake.setPower(0);
         }
 
-        // Slide Control (hold only)
+        // ── Slide (hold only) ──
         // DPad Up: extend | DPad Down: retract
         if (gamepad1.dpad_up) {
             slideMotor.setPower(Constants.SLIDE_POWER);
@@ -192,7 +169,7 @@ public class TeleOp extends OpMode {
             slideMotor.setPower(0);
         }
 
-        // ── Telemetry ────────────────────────────────────────────────────────
+        // ── Telemetry ──
         double[] motorPowers = drive.getMotorPowers();
         telemetry.addData("Status", "Running");
         telemetry.addLine();
@@ -229,7 +206,7 @@ public class TeleOp extends OpMode {
 
         telemetry.update();
 
-        // Send data to FTC Dashboard
+        // ── FTC Dashboard telemetry ──
         TelemetryPacket packet = new TelemetryPacket();
         double[] shooterVelocities = shooter.getMotorVelocities();
         double currentSpeed = (shooterVelocities[0] + shooterVelocities[1]) / 2.0;
@@ -246,312 +223,6 @@ public class TeleOp extends OpMode {
 
     @Override
     public void stop() {
-        visionPortal.close();
-    }
-
-    // ========================== INNER CLASSES ==========================
-
-    /**
-     * SlewRateLimiter - Limits the rate of change of a value for smooth acceleration
-     */
-    private static class SlewRateLimiter {
-        private final double maxRatePerSecond; // Maximum allowed change per second
-        private double previousValue;          // Last output value
-        private long previousTimeNanos;        // Last calculation time in nanoseconds
-        private boolean isFirstCall;           // Track if this is the first calculation
-
-        public SlewRateLimiter(double maxRatePerSecond) {
-            this.maxRatePerSecond = Math.abs(maxRatePerSecond); // Ensure positive
-            this.previousValue = 0.0;
-            this.previousTimeNanos = System.nanoTime();
-            this.isFirstCall = true;
-        }
-
-        public double calculate(double input) {
-            // Get current time
-            long currentTimeNanos = System.nanoTime();
-
-            // On first call, just return the input and initialize
-            if (isFirstCall) {
-                previousValue = input;
-                previousTimeNanos = currentTimeNanos;
-                isFirstCall = false;
-                return input;
-            }
-
-            // Calculate time elapsed in seconds
-            double deltaTimeSeconds = (currentTimeNanos - previousTimeNanos) / 1_000_000_000.0;
-
-            // Handle edge cases
-            if (deltaTimeSeconds <= 0) {
-                // No time has passed, return previous value
-                return previousValue;
-            }
-
-            // Calculate maximum allowed change for this time step
-            double maxChange = maxRatePerSecond * deltaTimeSeconds;
-
-            // Calculate desired change
-            double desiredChange = input - previousValue;
-
-            // Clamp the change to the maximum allowed
-            double limitedChange = Math.max(-maxChange, Math.min(maxChange, desiredChange));
-
-            // Calculate new output value
-            double output = previousValue + limitedChange;
-
-            // Update state for next call
-            previousValue = output;
-            previousTimeNanos = currentTimeNanos;
-
-            return output;
-        }
-
-        public void reset() {
-            previousValue = 0.0;
-            previousTimeNanos = System.nanoTime();
-            isFirstCall = true;
-        }
-
-        public void reset(double value) {
-            previousValue = value;
-            previousTimeNanos = System.nanoTime();
-            isFirstCall = false;
-        }
-
-        public double getLastValue() {
-            return previousValue;
-        }
-    }
-
-    /**
-     * MecanumDrive - Handles mecanum drive control with slew rate limiting
-     */
-    private static class MecanumDrive {
-        private DcMotor front_left  = null;
-        private DcMotor front_right = null;
-        private DcMotor back_left   = null;
-        private DcMotor back_right  = null;
-
-        // Slew rate limiters for smooth acceleration
-        private final SlewRateLimiter driveLimiter = new SlewRateLimiter(Constants.MAX_DRIVE_ACCEL);
-        private final SlewRateLimiter strafeLimiter = new SlewRateLimiter(Constants.MAX_STRAFE_ACCEL);
-        private final SlewRateLimiter twistLimiter = new SlewRateLimiter(Constants.MAX_TWIST_ACCEL);
-
-        // Current motor powers
-        private double[] currentSpeeds = new double[4];
-
-        public MecanumDrive(HardwareMap hardwareMap) {
-            front_left = hardwareMap.get(DcMotor.class, "lf");
-            front_right = hardwareMap.get(DcMotor.class, "rf");
-            back_left = hardwareMap.get(DcMotor.class, "lr");
-            back_right = hardwareMap.get(DcMotor.class, "rr");
-
-            front_left.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            front_right.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            back_left.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            back_right.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            front_left.setDirection(DcMotor.Direction.REVERSE);
-            back_left.setDirection(DcMotor.Direction.REVERSE);
-
-            front_right.setDirection(DcMotor.Direction.FORWARD);
-            back_right.setDirection(DcMotor.Direction.FORWARD);
-        }
-
-        private double applyScaledDeadzone(double input, double deadzone) {
-            double absInput = Math.abs(input);
-
-            // If within deadzone, return zero
-            if (absInput < deadzone) {
-                return 0.0;
-            }
-
-            // Remap [deadzone, 1.0] to [0.0, 1.0] and preserve sign
-            double scaled = (absInput - deadzone) / (1.0 - deadzone);
-            return Math.copySign(scaled, input);
-        }
-
-        public void update(Gamepad gamepad) {
-            double drive  = +gamepad.left_stick_y;
-            double strafe = -gamepad.left_stick_x;
-            double twist  = -gamepad.right_stick_x;
-
-            // Apply scaled deadzone to ignore small stick movements while preserving smooth control
-            // This remaps the range [DEADZONE, 1.0] to [0.0, 1.0] to avoid jumps
-            drive = applyScaledDeadzone(drive, Constants.JOYSTICK_DEADZONE);
-            strafe = applyScaledDeadzone(strafe, Constants.JOYSTICK_DEADZONE);
-            twist = applyScaledDeadzone(twist, Constants.JOYSTICK_DEADZONE);
-
-            // Apply non-linear scaling for finer control (preserve sign)
-            drive = Math.copySign(Math.pow(Math.abs(drive), Constants.DRIVE_SCALE_POWER), drive);
-            strafe = Math.copySign(Math.pow(Math.abs(strafe), Constants.DRIVE_SCALE_POWER), strafe);
-            twist = Math.copySign(Math.pow(Math.abs(twist), Constants.DRIVE_SCALE_POWER), twist);
-
-            // Apply slew rate limiting for smooth acceleration
-            drive = driveLimiter.calculate(drive);
-            strafe = strafeLimiter.calculate(strafe);
-            twist = twistLimiter.calculate(twist);
-
-            // Calculate mecanum wheel speeds
-            double[] speeds = {
-                    (drive + strafe + twist),  // front_left
-                    (drive - strafe - twist),  // front_right
-                    (drive - strafe + twist),  // back_left
-                    (drive + strafe - twist)   // back_right
-            };
-
-            applyAndSetPowers(speeds);
-        }
-
-        public double[] getMotorPowers() {
-            return currentSpeeds;
-        }
-
-        public void stop() {
-            front_left.setPower(0);
-            front_right.setPower(0);
-            back_left.setPower(0);
-            back_right.setPower(0);
-
-            // Reset slew rate limiters to prevent jumps
-            driveLimiter.reset();
-            strafeLimiter.reset();
-            twistLimiter.reset();
-        }
-
-        public void setRobotCentric(double drive, double strafe, double turn) {
-            // Calculate mecanum wheel speeds
-            double[] speeds = {
-                    (drive + strafe + turn),  // front_left
-                    (drive - strafe - turn),  // front_right
-                    (drive - strafe + turn),  // back_left
-                    (drive + strafe - turn)   // back_right
-            };
-
-            applyAndSetPowers(speeds);
-        }
-
-        private void applyAndSetPowers(double[] speeds) {
-            // Find the maximum absolute value of the speeds
-            double max = 1.0;
-            for(int i = 0; i < speeds.length; i++) {
-                if (Math.abs(speeds[i]) > max) {
-                    max = Math.abs(speeds[i]);
-                }
-            }
-
-            // Normalize the speeds if any is greater than 1.
-            if (max > 1.0) {
-                for (int i = 0; i < speeds.length; i++) {
-                    speeds[i] /= max;
-                }
-            }
-
-            // Store current speeds for telemetry (create a copy to avoid reference issues)
-            currentSpeeds = Arrays.copyOf(speeds, 4);
-
-            // Apply the calculated values to the motors
-            front_left.setPower(speeds[0]);
-            front_right.setPower(speeds[1]);
-            back_left.setPower(speeds[2]);
-            back_right.setPower(speeds[3]);
-        }
-    }
-
-    /**
-     * ShooterPID - PID controller for shooter motors
-     */
-    private static class ShooterPID {
-        private DcMotorEx shooterMotor1;
-        private DcMotorEx shooterMotor2;
-        private ElapsedTime timerS;
-
-        private double lastShooterError = 0;
-        private double shoot = 0;
-        private double shooterTarget = Constants.SHOOTER_TARGET;
-        private boolean targetChanged = false;
-
-        public ShooterPID(DcMotorEx motor1, DcMotorEx motor2) {
-            this.shooterMotor1 = motor1;
-            this.shooterMotor2 = motor2;
-            this.timerS = new ElapsedTime();
-            timerS.reset();
-        }
-
-        public void setTarget(double target) {
-            if (Math.abs(this.shooterTarget - target) > 0.1) {
-                targetChanged = true;
-            }
-            this.shooterTarget = target;
-        }
-
-        private void calculatePID() {
-            // Always calculate PID
-            double currentVelocity = (shooterMotor1.getVelocity() + shooterMotor2.getVelocity()) / 2.0;
-            double error = shooterTarget - currentVelocity;
-
-            // Calculate dt using milliseconds (more stable than microseconds)
-            double dt = Math.max(timerS.milliseconds() / 1000.0, 1e-3);
-
-            // Calculate derivative, but prevent derivative kick on target changes
-            double derivative = targetChanged ? 0 : (error - lastShooterError) / dt;
-            targetChanged = false;
-
-            // Feedforward (scaled properly to motor max RPM)
-            double maxRPM = 6000;
-            shoot = Constants.Kp_Shoot * error + Constants.Kd_shoot * derivative + Constants.Kf_Shoot * (shooterTarget / maxRPM);
-
-            // Clamp power to ±1 to prevent SDK overhead and jitter
-            shoot = Math.max(-1.0, Math.min(shoot, 1.0));
-
-            lastShooterError = error;
-
-            // Reset timer at the end for next cycle
-            timerS.reset();
-
-            // Apply power to both motors
-            shooterMotor1.setPower(shoot);
-            shooterMotor2.setPower(shoot);
-        }
-
-        public double update() {
-            // PID always runs
-            calculatePID();
-            return shoot;
-        }
-
-        public double updateAuto() {
-            calculatePID();
-            return shoot;
-        }
-
-        public double getOutput() {
-            return shoot;
-        }
-
-        public double getError() {
-            double avgVelocity = (shooterMotor1.getVelocity() + shooterMotor2.getVelocity()) / 2.0;
-            return shooterTarget - avgVelocity;
-        }
-
-        public double[] getMotorVelocities() {
-            return new double[]{shooterMotor1.getVelocity(), shooterMotor2.getVelocity()};
-        }
-
-        public boolean atTarget() {
-            return Math.abs(getError()) <= Constants.Shooter_Tolerance;
-        }
-
-        public void reset() {
-            lastShooterError = 0;
-            shoot = 0;
-            timerS.reset();
-        }
-
-        public void stop() {
-            shooterMotor1.setPower(0);
-            shooterMotor2.setPower(0);
-            reset();
-        }
+        aprilTagWebcam.close();
     }
 }
