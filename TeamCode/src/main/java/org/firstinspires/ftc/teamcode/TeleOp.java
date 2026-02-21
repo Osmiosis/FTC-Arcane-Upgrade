@@ -121,13 +121,16 @@ public class TeleOp extends OpMode {
 
         // Apply scaled deadzone
         forward = applyScaledDeadzone(forward, Constants.JOYSTICK_DEADZONE);
-        strafe  = applyScaledDeadzone(strafe,  Constants.JOYSTICK_DEADZONE);
+        strafe  = applyScaledDeadzone(strafe,  Constants.STRAFE_DEADZONE);
         rotate  = applyScaledDeadzone(rotate,  Constants.JOYSTICK_DEADZONE);
 
         // Apply cubic scaling for finer control
         forward = Math.copySign(Math.pow(Math.abs(forward), Constants.DRIVE_SCALE_POWER), forward);
         strafe  = Math.copySign(Math.pow(Math.abs(strafe),  Constants.DRIVE_SCALE_POWER), strafe);
         rotate  = Math.copySign(Math.pow(Math.abs(rotate),  Constants.DRIVE_SCALE_POWER), rotate);
+
+        // Apply turn sensitivity
+        rotate *= Constants.TURN_SENSITIVITY;
 
         // Apply slew rate limiting for smooth acceleration
         forward = driveLimiter.calculate(forward);

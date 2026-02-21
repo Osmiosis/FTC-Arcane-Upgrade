@@ -6,6 +6,8 @@ public class Constants {
 
     // Mecanum Drive Configuration
     public static double JOYSTICK_DEADZONE = 0.05;        // Ignore small stick movements below this threshold
+    public static double STRAFE_DEADZONE = 0.02;          // Lower deadzone for strafe so it responds easier
+    public static double TURN_SENSITIVITY = 0.7;          // Turn power multiplier (0.0–1.0). Lower = slower turns
     public static double DRIVE_SCALE_POWER = 3.0;         // Non-linear scaling power (1.0 = linear, 3.0 = cubic)
 
     // Slew Rate Limiting (units per second) - prevents jerky movements and motor strain
