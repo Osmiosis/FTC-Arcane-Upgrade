@@ -115,9 +115,9 @@ public class TeleOp extends OpMode {
     @Override
     public void loop() {
         // Gamepad inputs
-        forward = -gamepad1.left_stick_y;
-        strafe  =  gamepad1.left_stick_x;
-        rotate  =  gamepad1.right_stick_x;
+        forward = +gamepad1.left_stick_y;
+        strafe  =  -gamepad1.left_stick_x;
+        rotate  =  -gamepad1.right_stick_x;
 
         // Apply scaled deadzone
         forward = applyScaledDeadzone(forward, Constants.JOYSTICK_DEADZONE);
