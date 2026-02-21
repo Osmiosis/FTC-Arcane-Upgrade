@@ -7,25 +7,43 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.util.Range;
 
+import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
+import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
+
+import java.util.List;
 
 @com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOp", group = "TeleOp")
 public class TeleOp extends OpMode {
 
-    // ── Subsystems ──
-    private final AprilTagWebcam aprilTagWebcam = new AprilTagWebcam();
-    private MecanumDrive drive;
-    private ShooterPID shooter;
-    private FtcDashboard dashboard;
+    // ── Drive motors ──
+    private DcMotor front_left, front_right, back_left, back_right;
 
-    private DcMotorEx shooterMotor1;
-    private DcMotorEx shooterMotor2;
+    // ── Slew rate limiters for smooth acceleration ──
+    private final SlewRateLimiter driveLimiter  = new SlewRateLimiter(Constants.MAX_DRIVE_ACCEL);
+    private final SlewRateLimiter strafeLimiter = new SlewRateLimiter(Constants.MAX_STRAFE_ACCEL);
+    private final SlewRateLimiter twistLimiter  = new SlewRateLimiter(Constants.MAX_TWIST_ACCEL);
+
+    // ── Shooter ──
+    private DcMotorEx shooterMotor1, shooterMotor2;
+    private ShooterPID shooter;
+
+    // ── Other motors ──
     private DcMotor shooterIntake;
     private DcMotor slideMotor;
 
-    // ── AprilTag PD controller variables (matches YouTube tutorial) ──
+    // ── AprilTag ──
+    private AprilTagProcessor aprilTag;
+    private VisionPortal visionPortal;
+
+    // PD controller variables (exact same as YouTube tutorial)
+    private double kP = 0.002;
+    private double kD = 0.0001;
     private double error = 0;
     private double lastError = 0;
+    private double goalX = 0;
+    private double angleTolerance = 0.2;
     private double curTime = 0;
     private double lastTime = 0;
 
@@ -36,41 +54,59 @@ public class TeleOp extends OpMode {
     // Drive inputs
     private double forward, strafe, rotate;
 
+    private FtcDashboard dashboard;
+
     @Override
     public void init() {
-        // Initialize FTC Dashboard
         dashboard = FtcDashboard.getInstance();
 
-        // Initialize AprilTag webcam (streams to FTC Dashboard automatically)
-        aprilTagWebcam.init(hardwareMap, telemetry);
+        // ── Drive motors ──
+        front_left  = hardwareMap.get(DcMotor.class, "lf");
+        front_right = hardwareMap.get(DcMotor.class, "rf");
+        back_left   = hardwareMap.get(DcMotor.class, "lr");
+        back_right  = hardwareMap.get(DcMotor.class, "rr");
 
-        // Initialize Mecanum Drive
-        drive = new MecanumDrive(hardwareMap);
+        front_left.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        front_right.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        back_left.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        back_right.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // Initialize Shooter motors
+        front_left.setDirection(DcMotor.Direction.REVERSE);
+        back_left.setDirection(DcMotor.Direction.REVERSE);
+        front_right.setDirection(DcMotor.Direction.FORWARD);
+        back_right.setDirection(DcMotor.Direction.FORWARD);
+
+        // ── Shooter motors ──
         shooterMotor1 = hardwareMap.get(DcMotorEx.class, "shooter1");
         shooterMotor2 = hardwareMap.get(DcMotorEx.class, "shooter2");
         shooterMotor1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         shooterMotor1.setDirection(DcMotorEx.Direction.REVERSE);
         shooterMotor2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
-
-        // Initialize Shooter PID controller
         shooter = new ShooterPID(shooterMotor1, shooterMotor2);
 
-        // Initialize Shooter Intake
+        // ── Shooter Intake ──
         shooterIntake = hardwareMap.get(DcMotor.class, "shooter_intake");
         shooterIntake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        // Initialize Slide Motor
+        // ── Slide ──
         slideMotor = hardwareMap.get(DcMotor.class, "slide");
         slideMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        telemetry.addData("Status", "Initialized");
-        telemetry.addData("Drive", "Ready");
-        telemetry.addData("Shooter", "Ready");
-        telemetry.addData("Shooter Intake", "Ready");
-        telemetry.addData("Slide", "Ready");
-        telemetry.addData("AprilTag", "Ready (A to toggle align)");
+        // ── AprilTag + Vision Portal (MJPEG for 30 FPS, streams to Dashboard) ──
+        aprilTag = new AprilTagProcessor.Builder().build();
+        aprilTag.setDecimation(2);
+        visionPortal = new VisionPortal.Builder()
+                .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
+                .setCameraResolution(new android.util.Size(800, 600))
+                .setStreamFormat(VisionPortal.StreamFormat.MJPEG)
+                .addProcessor(aprilTag)
+                .enableLiveView(true)
+                .build();
+
+        // Stream to FTC Dashboard
+        FtcDashboard.getInstance().startCameraStream(visionPortal, 30);
+
+        telemetry.addLine("Initialized");
         telemetry.update();
     }
 
@@ -82,12 +118,27 @@ public class TeleOp extends OpMode {
 
     @Override
     public void loop() {
-        // ── Gamepad inputs ──
+        // Gamepad inputs
         forward = -gamepad1.left_stick_y;
         strafe  =  gamepad1.left_stick_x;
         rotate  =  gamepad1.right_stick_x;
 
-        // ── AprilTag toggle (A button rising edge) ──
+        // Apply scaled deadzone
+        forward = applyScaledDeadzone(forward, Constants.JOYSTICK_DEADZONE);
+        strafe  = applyScaledDeadzone(strafe,  Constants.JOYSTICK_DEADZONE);
+        rotate  = applyScaledDeadzone(rotate,  Constants.JOYSTICK_DEADZONE);
+
+        // Apply cubic scaling for finer control
+        forward = Math.copySign(Math.pow(Math.abs(forward), Constants.DRIVE_SCALE_POWER), forward);
+        strafe  = Math.copySign(Math.pow(Math.abs(strafe),  Constants.DRIVE_SCALE_POWER), strafe);
+        rotate  = Math.copySign(Math.pow(Math.abs(rotate),  Constants.DRIVE_SCALE_POWER), rotate);
+
+        // Apply slew rate limiting for smooth acceleration
+        forward = driveLimiter.calculate(forward);
+        strafe  = strafeLimiter.calculate(strafe);
+        rotate  = twistLimiter.calculate(rotate);
+
+        // AprilTag toggle (A button rising edge)
         boolean aPressed = gamepad1.a;
         if (aPressed && !aPreviouslyPressed) {
             aprilTagOn = !aprilTagOn;
@@ -96,50 +147,46 @@ public class TeleOp extends OpMode {
         }
         aPreviouslyPressed = aPressed;
 
-        // ── AprilTag detection (always update so dashboard shows the feed) ──
-        aprilTagWebcam.update();
+        // AprilTag detection
+        List<AprilTagDetection> currentDetections = aprilTag.getDetections();
+        AprilTagDetection id20 = null;
+        for (AprilTagDetection d : currentDetections) {
+            if (d.metadata != null && d.id == 20) {
+                id20 = d;
+                break;
+            }
+        }
 
-        // ── Auto-align logic (copied from YouTube tutorial, with rear-camera negate) ──
+        // Auto-align logic (same as YouTube tutorial, bearing negated for rear-facing camera)
         if (aprilTagOn) {
-            // Get first visible tag (or use getTagBySpecificId(20) for a specific one)
-            AprilTagDetection target = aprilTagWebcam.getFirstDetection();
+            if (id20 != null) {
+                // Camera faces BACKWARD → negate bearing
+                error = goalX - (-id20.ftcPose.bearing);
 
-            if (target != null) {
-                // Camera faces BACKWARD → negate bearing so robot turns correctly
-                error = Constants.ALIGN_GOAL_BEARING - (-target.ftcPose.bearing);
-
-                if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
+                if (Math.abs(error) < angleTolerance) {
                     rotate = 0;
                 } else {
-                    double pTerm = error * Constants.ALIGN_KP;
+                    double pTerm = error * kP;
                     curTime = getRuntime();
                     double dt = curTime - lastTime;
-                    double dTerm = ((error - lastError) / dt) * Constants.ALIGN_KD;
+                    double dTerm = ((error - lastError) / dt) * kD;
 
-                    rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
+                    rotate = Range.clip(pTerm + dTerm, -0.4, 0.4);
 
                     lastError = error;
                     lastTime = curTime;
                 }
-
-                telemetry.addData("AprilTag", "Aligning  ID:%d  Bearing:%.1f°  Error:%.2f°",
-                        target.id, target.ftcPose.bearing, error);
-                telemetry.addData("Align Rotate", "%.3f", rotate);
             } else {
                 lastTime = getRuntime();
                 lastError = 0;
-                telemetry.addData("AprilTag", "Searching... (no tag detected)");
             }
-
-            // Use setRobotCentric during alignment (bypasses slew rate limiting for precise control)
-            drive.setRobotCentric(forward, strafe, rotate);
         } else {
             lastError = 0;
             lastTime = getRuntime();
-
-            // Normal manual drive — all sticks active with slew rate limiting
-            drive.update(gamepad1);
         }
+
+        // Drive call
+        drive(forward, strafe, rotate);
 
         // ── Shooter: right trigger sets target velocity ──
         if (gamepad1.right_trigger > Constants.TRIGGER_DEADZONE) {
@@ -150,7 +197,6 @@ public class TeleOp extends OpMode {
         shooter.update();
 
         // ── Shooter Intake (hold only) ──
-        // Left Trigger: run forward | Left Bumper: run in reverse
         if (gamepad1.left_trigger > Constants.TRIGGER_DEADZONE) {
             shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
         } else if (gamepad1.left_bumper) {
@@ -160,7 +206,6 @@ public class TeleOp extends OpMode {
         }
 
         // ── Slide (hold only) ──
-        // DPad Up: extend | DPad Down: retract
         if (gamepad1.dpad_up) {
             slideMotor.setPower(Constants.SLIDE_POWER);
         } else if (gamepad1.dpad_down) {
@@ -170,59 +215,128 @@ public class TeleOp extends OpMode {
         }
 
         // ── Telemetry ──
-        double[] motorPowers = drive.getMotorPowers();
         telemetry.addData("Status", "Running");
-        telemetry.addLine();
+        telemetry.addData("AprilTag Align", aprilTagOn ? "ON" : "OFF");
+        if (aprilTagOn && id20 != null) {
+            telemetry.addData("Tag ID", id20.id);
+            telemetry.addData("Bearing", "%.1f°", id20.ftcPose.bearing);
+            telemetry.addData("Error", "%.2f°", error);
+            telemetry.addData("Rotate", "%.3f", rotate);
+        }
+        telemetry.addData("Drive", "FL:%.2f FR:%.2f BL:%.2f BR:%.2f",
+                front_left.getPower(), front_right.getPower(),
+                back_left.getPower(), back_right.getPower());
 
-        telemetry.addData("Drive Motors", "FL:%.2f FR:%.2f BL:%.2f BR:%.2f",
-                motorPowers[0], motorPowers[1], motorPowers[2], motorPowers[3]);
-
-        telemetry.addLine();
         double[] velocities = shooter.getMotorVelocities();
-        telemetry.addData("Shooter Target", "%.0f ticks/sec", Constants.SHOOTER_TARGET);
-        telemetry.addData("Shooter Velocities", "M1:%.0f M2:%.0f", velocities[0], velocities[1]);
+        telemetry.addData("Shooter", "M1:%.0f M2:%.0f", velocities[0], velocities[1]);
         telemetry.addData("Shooter Error", "%.0f", shooter.getError());
-        telemetry.addData("Shooter Power", "%.3f", shooter.getOutput());
         telemetry.addData("At Target", shooter.atTarget() ? "YES" : "NO");
 
-        telemetry.addLine();
-        boolean shooterReady = Math.abs(shooter.getError()) <= Constants.SHOOTER_READY_TOLERANCE;
-        telemetry.addData("Shooter Ready", shooterReady ? "YES" : "NO");
-        String shooterIntakeStatus = shooterIntake.getPower() > 0 ? "RUNNING" :
+        String intakeStatus = shooterIntake.getPower() > 0 ? "RUNNING" :
                 shooterIntake.getPower() < 0 ? "REVERSE" : "STOPPED";
-        telemetry.addData("Shooter Intake", shooterIntakeStatus);
+        telemetry.addData("Shooter Intake", intakeStatus);
 
-        telemetry.addLine();
         String slideStatus = slideMotor.getPower() > 0 ? "UP" :
                 slideMotor.getPower() < 0 ? "DOWN" : "STOPPED";
         telemetry.addData("Slide", slideStatus);
 
         telemetry.addLine();
-        telemetry.addData("Controls", "Left Stick: Drive/Strafe | Right Stick: Turn");
-        telemetry.addData("AprilTag Align", "A: Toggle align (ON: " + (aprilTagOn ? "YES" : "NO") + ")");
-        telemetry.addData("Shooter", "Right Trigger: Activate");
-        telemetry.addData("Shooter Intake", "Left Trigger: Feed | Left Bumper: REVERSE");
-        telemetry.addData("Slide", "DPad Up: Extend | DPad Down: Retract");
-
+        telemetry.addData("Controls", "LStick:Drive | RStick:Turn | A:AprilTag Toggle");
+        telemetry.addData("", "RT:Shooter | LT:Intake | LB:Intake Rev");
+        telemetry.addData("", "DUp:Slide Up | DDown:Slide Down");
         telemetry.update();
 
         // ── FTC Dashboard telemetry ──
         TelemetryPacket packet = new TelemetryPacket();
-        double[] shooterVelocities = shooter.getMotorVelocities();
-        double currentSpeed = (shooterVelocities[0] + shooterVelocities[1]) / 2.0;
-
+        double[] sv = shooter.getMotorVelocities();
         packet.put("Shooter Target Speed", Constants.SHOOTER_TARGET);
-        packet.put("Shooter Current Speed", currentSpeed);
-        packet.put("Shooter Motor 1 Speed", shooterVelocities[0]);
-        packet.put("Shooter Motor 2 Speed", shooterVelocities[1]);
+        packet.put("Shooter Current Speed", (sv[0] + sv[1]) / 2.0);
         packet.put("Shooter Error", shooter.getError());
         packet.put("Shooter Power Output", shooter.getOutput());
-
         dashboard.sendTelemetryPacket(packet);
+    }
+
+    // ── Scaled deadzone (remaps [deadzone, 1.0] → [0.0, 1.0]) ──
+    private double applyScaledDeadzone(double input, double deadzone) {
+        double absInput = Math.abs(input);
+        if (absInput < deadzone) return 0.0;
+        double scaled = (absInput - deadzone) / (1.0 - deadzone);
+        return Math.copySign(scaled, input);
+    }
+
+    // ── Mecanum drive (inlined, with normalization) ──
+    private void drive(double drive, double strafe, double turn) {
+        double[] speeds = {
+                (drive + strafe + turn),   // front_left
+                (drive - strafe - turn),   // front_right
+                (drive - strafe + turn),   // back_left
+                (drive + strafe - turn)    // back_right
+        };
+
+        double max = 1.0;
+        for (double s : speeds) {
+            if (Math.abs(s) > max) max = Math.abs(s);
+        }
+        if (max > 1.0) {
+            for (int i = 0; i < speeds.length; i++) speeds[i] /= max;
+        }
+
+        front_left.setPower(speeds[0]);
+        front_right.setPower(speeds[1]);
+        back_left.setPower(speeds[2]);
+        back_right.setPower(speeds[3]);
     }
 
     @Override
     public void stop() {
-        aprilTagWebcam.close();
+        FtcDashboard.getInstance().stopCameraStream();
+        if (visionPortal != null) {
+            visionPortal.close();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SlewRateLimiter — inlined inner class, no external dependency
+    // ══════════════════════════════════════════════════════════════════
+    private static class SlewRateLimiter {
+        private final double maxRatePerSecond;
+        private double previousValue;
+        private long previousTimeNanos;
+        private boolean isFirstCall;
+
+        public SlewRateLimiter(double maxRatePerSecond) {
+            this.maxRatePerSecond = Math.abs(maxRatePerSecond);
+            this.previousValue = 0.0;
+            this.previousTimeNanos = System.nanoTime();
+            this.isFirstCall = true;
+        }
+
+        public double calculate(double input) {
+            long currentTimeNanos = System.nanoTime();
+            if (isFirstCall) {
+                previousValue = input;
+                previousTimeNanos = currentTimeNanos;
+                isFirstCall = false;
+                return input;
+            }
+            double dt = (currentTimeNanos - previousTimeNanos) / 1_000_000_000.0;
+            if (dt <= 0) return previousValue;
+
+            double maxChange = maxRatePerSecond * dt;
+            double desiredChange = input - previousValue;
+            double limitedChange = Math.max(-maxChange, Math.min(maxChange, desiredChange));
+            double output = previousValue + limitedChange;
+
+            previousValue = output;
+            previousTimeNanos = currentTimeNanos;
+            return output;
+        }
+
+        public void reset() {
+            previousValue = 0.0;
+            previousTimeNanos = System.nanoTime();
+            isFirstCall = true;
+        }
     }
 }
+
