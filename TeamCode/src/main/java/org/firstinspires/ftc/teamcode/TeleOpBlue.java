@@ -14,8 +14,8 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 
 import java.util.List;
 
-@com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOp", group = "TeleOp")
-public class TeleOp extends OpMode {
+@com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOpBlue", group = "TeleOpBlue")
+public class TeleOpBlue extends OpMode {
 
     // ── Drive motors ──
     private DcMotor front_left, front_right, back_left, back_right;
