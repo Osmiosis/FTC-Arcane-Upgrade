@@ -197,9 +197,9 @@ public class TeleOp extends OpMode {
 
         // ── Shooter Intake (hold only) ──
         if (gamepad1.left_trigger > Constants.TRIGGER_DEADZONE) {
-            shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-        } else if (gamepad1.left_bumper) {
             shooterIntake.setPower(-Constants.SHOOTER_INTAKE_POWER);
+        } else if (gamepad1.left_bumper) {
+            shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
         } else {
             shooterIntake.setPower(0);
         }
