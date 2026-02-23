@@ -477,6 +477,7 @@ public class AutonomousRedAtShoot extends OpMode {
         // Initialize Shooter Intake
         shooterIntake = hardwareMap.get(DcMotor.class, "shooter_intake");
         shooterIntake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        shooterIntake.setDirection(DcMotor.Direction.REVERSE);
 
         // Initialize Block Servo - keep fully open for entire autonomous
         blockServo = hardwareMap.get(Servo.class, "Block");
