@@ -81,4 +81,15 @@ public class Constants {
     public static double CAMERA_OFFSET_X_CM = 14.5;
     @Deprecated
     public static double CAMERA_OFFSET_Y_CM = 0.0;
+
+    // Camera offset from shooter flywheel centre (inches, positive X = right, positive Y = forward)
+    // Adjust these to match your robot's physical camera mounting position
+    public static double CAMERA_OFFSET_X = 0.0;   // Lateral offset (inches) — camera left/right of shooter centre
+    public static double CAMERA_OFFSET_Y = 0.0;   // Forward offset (inches) — camera ahead/behind shooter centre
+
+    // Field-Centric Drive — starting heading offsets (degrees)
+    // These are the Pinpoint headings reported at the start of TeleOp (end of Auto) for each alliance.
+    // Subtracting them makes "stick forward" = away from the driver on the field.
+    public static double FIELD_FORWARD_OFFSET_BLUE_DEG = 318.0;  // Blue alliance starting heading
+    public static double FIELD_FORWARD_OFFSET_RED_DEG  = 222.0;  // Red alliance starting heading
 }

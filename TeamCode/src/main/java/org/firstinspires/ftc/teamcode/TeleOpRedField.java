@@ -2,20 +2,22 @@ package org.firstinspires.ftc.teamcode;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 
 import java.util.List;
 
-@com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOpRed", group = "TeleOpRed")
-public class TeleOpRed extends OpMode {
+@com.qualcomm.robotcore.eventloop.opmode.TeleOp(name = "Robot TeleOpRedField", group = "TeleOpRed")
+public class TeleOpRedField extends OpMode {
 
     // ── Drive motors ──
     private DcMotor front_left, front_right, back_left, back_right;
@@ -36,6 +38,9 @@ public class TeleOpRed extends OpMode {
     // ── AprilTag ──
     private AprilTagProcessor aprilTag;
     private VisionPortal visionPortal;
+
+    // ── Pinpoint IMU (field-centric) ──
+    private GoBildaPinpointDriver pinpoint;
 
     // PD controller state
     private double error = 0;
@@ -88,6 +93,9 @@ public class TeleOpRed extends OpMode {
         slideMotor = hardwareMap.get(DcMotor.class, "slide");
         slideMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
+        // ── Pinpoint IMU ──
+        pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, "pinpoint");
+
         // ── AprilTag + Vision Portal (MJPEG for 30 FPS, streams to Dashboard) ──
         aprilTag = new AprilTagProcessor.Builder().build();
         aprilTag.setDecimation(2);
@@ -102,7 +110,7 @@ public class TeleOpRed extends OpMode {
         // Stream to FTC Dashboard
         FtcDashboard.getInstance().startCameraStream(visionPortal, 30);
 
-        telemetry.addLine("Initialized");
+        telemetry.addLine("Initialized (Field-Centric)");
         telemetry.update();
     }
 
@@ -114,6 +122,12 @@ public class TeleOpRed extends OpMode {
 
     @Override
     public void loop() {
+        // ── Update Pinpoint and read field-relative heading ──
+        pinpoint.update();
+        // Subtract the starting heading offset so that stick-forward = away from driver
+        double headingRad = pinpoint.getHeading(AngleUnit.RADIANS)
+                - Math.toRadians(Constants.FIELD_FORWARD_OFFSET_RED_DEG);
+
         // Gamepad inputs
         forward = +gamepad1.left_stick_y;
         strafe  =  -gamepad1.left_stick_x;
@@ -136,6 +150,13 @@ public class TeleOpRed extends OpMode {
         forward = driveLimiter.calculate(forward);
         strafe  = strafeLimiter.calculate(strafe);
         rotate  = twistLimiter.calculate(rotate);
+
+        // ── Field-centric: rotate joystick vector by negative robot heading ──
+        // This makes stick directions always relative to the field, not the robot face.
+        double fieldForward = forward * Math.cos(-headingRad) - strafe * Math.sin(-headingRad);
+        double fieldStrafe  = forward * Math.sin(-headingRad) + strafe * Math.cos(-headingRad);
+        forward = fieldForward;
+        strafe  = fieldStrafe;
 
         // AprilTag toggle (A button rising edge)
         boolean aPressed = gamepad1.a;
@@ -218,7 +239,8 @@ public class TeleOpRed extends OpMode {
         }
 
         // ── Telemetry ──
-        telemetry.addData("Status", "Running");
+        telemetry.addData("Status", "Running (Field-Centric)");
+        telemetry.addData("Heading", "%.1f°", Math.toDegrees(headingRad));
         telemetry.addData("AprilTag Align", aprilTagOn ? "ON" : "OFF");
         if (aprilTagOn && id24 != null) {
             telemetry.addData("Tag ID", id24.id);
@@ -256,6 +278,7 @@ public class TeleOpRed extends OpMode {
         packet.put("Shooter Current Speed", (sv[0] + sv[1]) / 2.0);
         packet.put("Shooter Error", shooter.getError());
         packet.put("Shooter Power Output", shooter.getOutput());
+        packet.put("Heading (deg)", Math.toDegrees(headingRad));
         dashboard.sendTelemetryPacket(packet);
     }
 

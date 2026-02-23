@@ -159,8 +159,12 @@ public class TeleOpBlue extends OpMode {
         // Auto-align logic (same as YouTube tutorial, bearing negated for rear-facing camera)
         if (aprilTagOn) {
             if (id20 != null) {
-                // Camera faces BACKWARD → negate bearing
-                error = Constants.ALIGN_GOAL_BEARING - (-id20.ftcPose.bearing);
+                // Camera faces BACKWARD → negate bearing, then correct for camera offset from shooter centre
+                double rawBearing = -id20.ftcPose.bearing;
+                double tagX = id20.ftcPose.range * Math.sin(Math.toRadians(rawBearing)) + Constants.CAMERA_OFFSET_X;
+                double tagY = id20.ftcPose.range * Math.cos(Math.toRadians(rawBearing)) + Constants.CAMERA_OFFSET_Y;
+                double correctedBearing = Math.toDegrees(Math.atan2(tagX, tagY));
+                error = Constants.ALIGN_GOAL_BEARING - correctedBearing;
 
                 if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
                     rotate = 0;
