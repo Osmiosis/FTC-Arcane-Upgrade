@@ -133,14 +133,9 @@ public class TeleOpBlue extends OpMode {
         rotate *= Constants.TURN_SENSITIVITY;
 
         // Apply slew rate limiting for smooth acceleration
-        // (twist limiter is bypassed during AprilTag alignment — PD controller manages smoothness itself)
         forward = driveLimiter.calculate(forward);
         strafe  = strafeLimiter.calculate(strafe);
-        if (!aprilTagOn) {
-            rotate = twistLimiter.calculate(rotate);
-        } else {
-            twistLimiter.reset(); // keep limiter in sync so manual mode is smooth when toggling back
-        }
+        rotate  = twistLimiter.calculate(rotate);
 
         // AprilTag toggle (A button rising edge)
         boolean aPressed = gamepad1.a;
@@ -148,7 +143,6 @@ public class TeleOpBlue extends OpMode {
             aprilTagOn = !aprilTagOn;
             lastError = 0;
             lastTime = getRuntime();
-            twistLimiter.reset(); // reset so stale limiter state doesn't fight PD output on first frame
         }
         aPreviouslyPressed = aPressed;
 
@@ -162,7 +156,7 @@ public class TeleOpBlue extends OpMode {
             }
         }
 
-        // Auto-align logic (same as YouTube tutorial, bearing negated for rear-facing camera)
+        // Auto-align logic
         if (aprilTagOn) {
             if (id20 != null) {
                 // Camera faces BACKWARD → negate bearing, then correct for camera offset from shooter centre
@@ -174,11 +168,12 @@ public class TeleOpBlue extends OpMode {
 
                 if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
                     rotate = 0;
+                    lastError = 0;
                 } else {
                     double pTerm = error * Constants.ALIGN_KP;
                     curTime = getRuntime();
                     double dt = curTime - lastTime;
-                    double dTerm = ((error - lastError) / dt) * Constants.ALIGN_KD;
+                    double dTerm = (dt > 0) ? ((error - lastError) / dt) * Constants.ALIGN_KD : 0;
 
                     rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
 
@@ -186,8 +181,14 @@ public class TeleOpBlue extends OpMode {
                     lastTime = curTime;
                 }
             } else {
-                lastTime = getRuntime();
-                lastError = 0;
+                // Tag not visible — keep rotating using last known error so robot doesn't stop dead
+                if (Math.abs(lastError) > Constants.ALIGN_ANGLE_TOLERANCE) {
+                    rotate = Range.clip(lastError * Constants.ALIGN_KP, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
+                } else {
+                    rotate = 0;
+                    lastTime = getRuntime();
+                    lastError = 0;
+                }
             }
         } else {
             lastError = 0;
@@ -348,4 +349,3 @@ public class TeleOpBlue extends OpMode {
         }
     }
 }
-
