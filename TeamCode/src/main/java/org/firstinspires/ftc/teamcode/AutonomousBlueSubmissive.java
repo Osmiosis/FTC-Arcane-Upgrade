@@ -27,35 +27,16 @@ public class AutonomousBlueSubmissive extends OpMode {
     // Shooting state tracking
     private Timer shootTimer;
     private boolean shootingComplete = false;
-    private Timer shootTimer2;
-    private boolean shootingComplete2 = false;
-    private Timer shootTimer3;
-    private boolean shootingComplete3 = false;
-    private Timer shootTimer4;
-    private boolean shootingComplete4 = false;
-    private static final double WAIT_AT_SHOOT_POSE = 2.5; // increased for consistency (3 pulses over 2.5s)
+    private static final double WAIT_AT_SHOOT_POSE = 2.5;
 
     // ── Intake pulse settings ──────────────────────────────────────────────────
-    // DRIVING intake: pulses at 0.5s on / 0.5s off while collecting
-    private static final double PULSE_ON_SECONDS  = 0.5;
-    private static final double PULSE_OFF_SECONDS = 0.5;
-
-    // SHOOTING intake: exactly 3 pulses over WAIT_AT_SHOOT_POSE seconds
-    // Each pulse cycle = 2.5 / 3 = ~0.833s. On = Off = ~0.417s.
     private static final double SHOOT_PULSE_CYCLE = WAIT_AT_SHOOT_POSE / 3.0;
     private static final double SHOOT_PULSE_ON    = SHOOT_PULSE_CYCLE / 2.0;
-    private static final double SHOOT_PULSE_OFF   = SHOOT_PULSE_CYCLE / 2.0;
 
     private Timer pulseTimer = new Timer();
 
     // ── Shooter speed ──────────────────────────────────────────────────────────
     private static final double SHOOTER_SPEED_SCALE = 0.83;
-
-    /** Pulsed power while DRIVING to collect (0.5s on / 0.5s off). */
-    private double getPulsedIntakePower() {
-        double elapsed = pulseTimer.getElapsedTimeSeconds() % (PULSE_ON_SECONDS + PULSE_OFF_SECONDS);
-        return elapsed < PULSE_ON_SECONDS ? Constants.SHOOTER_INTAKE_POWER : 0.0;
-    }
 
     /** Pulsed power while SHOOTING — exactly 3 pulses over WAIT_AT_SHOOT_POSE seconds. */
     private double getShootingPulsePower() {
@@ -63,91 +44,54 @@ public class AutonomousBlueSubmissive extends OpMode {
         return elapsed < SHOOT_PULSE_ON ? Constants.SHOOTER_INTAKE_POWER : 0.0;
     }
 
-    /** Call this once when you want to START a new pulse cycle (resets the timer). */
     private void startIntakePulse() {
         pulseTimer.resetTimer();
     }
 
-    /** Scaled shooter target to fix overshoot. */
     private double scaledShooterTarget() {
         return Constants.SHOOTER_TARGET * SHOOTER_SPEED_SCALE;
     }
 
     public enum PathState {
-        DRIVE_STARTPOS_SHOOT_POS,
-        ALIGN_TO_CITADEL,
-        SHOOT_PRELOAD,
-        DRIVE_SHOOTPOSE_FIRSTCYCLEINTAKEPREP,
-        INTAKE_PREP,
-        DRIVE_INTAKEPREP_INTAKECOLLECT,
-        INTAKE_COLLECT,
-        DRIVE_INTAKECOLLECT_SHOOTPOSE,
-        ALIGN_TO_CITADEL_CYCLE1,
-        SHOOT_CYCLE1,
-        DRIVE_SHOOTPOSE_SECONDCYCLEINTAKEPREP,
-        SECOND_INTAKE_PREP,
-        DRIVE_SECONDINTAKEPREP_SECONDINTAKECOLLECT,
-        SECOND_INTAKE_COLLECT,
-        DRIVE_SECONDINTAKECOLLECT_SHOOTPOSE,
-        ALIGN_TO_CITADEL_CYCLE2,
-        SHOOT_CYCLE2,
-        DRIVE_SHOOTPOSE_THIRDCYCLEINTAKEPREP,
-        THIRD_INTAKE_PREP,
-        DRIVE_THIRDINTAKEPREP_THIRDINTAKECOLLECT,
-        THIRD_INTAKE_COLLECT,
-        DRIVE_THIRDINTAKECOLLECT_SHOOTPOSE,
-        ALIGN_TO_CITADEL_CYCLE3,
-        SHOOT_CYCLE3,
-        DRIVE_TO_END_POSE,
+        DRIVE_STARTPOS_SHOOT_POS,    // drive up at 90°
+        ALIGN_TO_CITADEL,            // nudge down, rotate 90° -> 136°
+        SHOOT_PRELOAD,               // shoot at 136°
+        DRIVE_TO_END_POSE,           // drive to end, rotate 136° -> 90°
         END
     }
 
     PathState pathState;
 
-    private final Pose startPose = new Pose(20.765, 122.161, Math.toRadians(318));
+    private final Pose startPose = new Pose(60.199, 8.003, Math.toRadians(90));
 
     private PathChain driveStartPosShootPos;
     private PathChain alignToCitadel;
-    private PathChain driveShootPosFirstCycleIntakePrep;
-    private PathChain driveIntakePrepIntakeCollect;
-    private PathChain driveIntakeCollectShootPos;
-    private PathChain driveShootPosSecondCycleIntakePrep;
-    private PathChain driveSecondIntakePrepSecondIntakeCollect;
-    private PathChain driveSecondIntakeCollectShootPos;
-    private PathChain driveShootPosThirdCycleIntakePrep;
-    private PathChain driveThirdIntakePrepThirdIntakeCollect;
-    private PathChain driveThirdIntakeCollectShootPos;
-    private PathChain driveShootPosEndPose;
+    private PathChain driveToEndPose;
 
     public void buildPaths() {
-        // start -> shoot (constant 318°)
+        // start -> shoot approach (constant 90°) — drive straight up
         driveStartPosShootPos = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(20.765, 122.161), new Pose(51.612, 91.712)))
-                .setConstantHeadingInterpolation(Math.toRadians(318))
+                .addPath(new BezierLine(new Pose(60.199, 8.003), new Pose(59.762, 92.233)))
+                .setConstantHeadingInterpolation(Math.toRadians(90))
                 .build();
 
-        // citadel alignment nudge
+        // nudge down and rotate to shooting heading (90° -> 136°)
         alignToCitadel = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(51.612, 91.712), new Pose(50.5, 93.0)))
-                .setConstantHeadingInterpolation(Math.toRadians(318))
+                .addPath(new BezierLine(new Pose(59.762, 92.233), new Pose(60.053, 83.210)))
+                .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(136))
                 .build();
 
-        // shoot -> first intake prep (turn 318° -> 180°)
-        driveShootPosFirstCycleIntakePrep = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(51.612, 91.712), new Pose(51.612, 78.25)))
-                .setLinearHeadingInterpolation(Math.toRadians(318), Math.toRadians(180))
-                .build();
-
-        // shoot -> end pose
-        driveShootPosEndPose = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(51.612, 91.712), new Pose(47.19, 74.87)))
-                .setConstantHeadingInterpolation(Math.toRadians(318))
+        // after shooting, drive to end pose and rotate back (136° -> 90°)
+        driveToEndPose = follower.pathBuilder()
+                .addPath(new BezierLine(new Pose(60.053, 83.210), new Pose(68.164, 38.899)))
+                .setLinearHeadingInterpolation(Math.toRadians(136), Math.toRadians(90))
                 .build();
     }
 
     public void statePathUpdate(){
         switch (pathState){
             case DRIVE_STARTPOS_SHOOT_POS:
+                // Spinner up while driving up
                 shooter.setTarget(scaledShooterTarget());
                 shooter.update();
                 shooterIntake.setPower(0);
@@ -162,10 +106,11 @@ public class AutonomousBlueSubmissive extends OpMode {
                 break;
 
             case ALIGN_TO_CITADEL:
+                // Nudge down while rotating to 136° — shooter stays spun up
                 shooter.setTarget(scaledShooterTarget());
                 shooter.update();
                 shooterIntake.setPower(0);
-                telemetry.addData("Status", "Aligning to citadel...");
+                telemetry.addData("Status", "Aligning to citadel (rotating to 136°)...");
                 telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
                 if (!follower.isBusy()) {
                     setTransitionPathState(PathState.SHOOT_PRELOAD);
@@ -173,6 +118,7 @@ public class AutonomousBlueSubmissive extends OpMode {
                 break;
 
             case SHOOT_PRELOAD:
+                // Shoot at 136° heading with pulsed intake
                 shooter.update();
                 double err0 = Math.abs(shooter.getError());
                 if (err0 <= 200.0 && !shootingComplete) {
@@ -187,8 +133,8 @@ public class AutonomousBlueSubmissive extends OpMode {
                         shooter.setTarget(0);
                         shooter.update();
                         shootingComplete = true;
-                        follower.followPath(driveShootPosFirstCycleIntakePrep, true);
-                        setTransitionPathState(PathState.DRIVE_SHOOTPOSE_FIRSTCYCLEINTAKEPREP);
+                        follower.followPath(driveToEndPose, true);
+                        setTransitionPathState(PathState.DRIVE_TO_END_POSE);
                     } else {
                         telemetry.addData("Shooting Timer", "%.1f / %.1f", shootTimer.getElapsedTimeSeconds(), WAIT_AT_SHOOT_POSE);
                     }
@@ -200,281 +146,12 @@ public class AutonomousBlueSubmissive extends OpMode {
                 telemetry.addData("Shooter Intake", shooterIntake.getPower() > 0 ? "PULSING" : "STOPPED");
                 break;
 
-            case DRIVE_SHOOTPOSE_FIRSTCYCLEINTAKEPREP:
-                shooter.setTarget(0);
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Driving to first intake prep");
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.INTAKE_PREP);
-                }
-                break;
-
-            case INTAKE_PREP:
-                shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "First intake prep - intake running");
-                follower.followPath(driveIntakePrepIntakeCollect, true);
-                setTransitionPathState(PathState.DRIVE_INTAKEPREP_INTAKECOLLECT);
-                break;
-
-            case DRIVE_INTAKEPREP_INTAKECOLLECT:
-                shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Driving to first intake collect");
-                telemetry.addData("Intake", "RUNNING");
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.INTAKE_COLLECT);
-                }
-                break;
-
-            case INTAKE_COLLECT:
-                shooterIntake.setPower(0);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "First collect done - returning to shooter");
-                follower.followPath(driveIntakeCollectShootPos, true);
-                setTransitionPathState(PathState.DRIVE_INTAKECOLLECT_SHOOTPOSE);
-                break;
-
-            case DRIVE_INTAKECOLLECT_SHOOTPOSE:
-                shooter.setTarget(scaledShooterTarget());
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Returning to shooter - spinning up");
-                telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
-                if (!follower.isBusy()) {
-                    follower.followPath(alignToCitadel, true);
-                    setTransitionPathState(PathState.ALIGN_TO_CITADEL_CYCLE1);
-                }
-                break;
-
-            case ALIGN_TO_CITADEL_CYCLE1:
-                shooter.setTarget(scaledShooterTarget());
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Aligning to citadel (cycle 1)...");
-                telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.SHOOT_CYCLE1);
-                }
-                break;
-
-            case SHOOT_CYCLE1:
-                shooter.update();
-                double err1 = Math.abs(shooter.getError());
-                if (err1 <= 200.0 && !shootingComplete2) {
-                    shooterIntake.setPower(getShootingPulsePower());
-                    if (shootTimer2 == null) {
-                        shootTimer2 = new Timer();
-                        shootTimer2.resetTimer();
-                        startIntakePulse();
-                    }
-                    if (shootTimer2.getElapsedTimeSeconds() >= WAIT_AT_SHOOT_POSE) {
-                        shooterIntake.setPower(0);
-                        shooter.setTarget(0);
-                        shooter.update();
-                        shootingComplete2 = true;
-                        follower.followPath(driveShootPosSecondCycleIntakePrep, true);
-                        setTransitionPathState(PathState.DRIVE_SHOOTPOSE_SECONDCYCLEINTAKEPREP);
-                    } else {
-                        telemetry.addData("Cycle1 Timer", "%.1f / %.1f", shootTimer2.getElapsedTimeSeconds(), WAIT_AT_SHOOT_POSE);
-                    }
-                } else if (!shootingComplete2) {
-                    shooterIntake.setPower(0);
-                    telemetry.addData("Shooter Status", "Waiting for speed");
-                }
-                telemetry.addData("Shooter Error", "%.0f", err1);
-                telemetry.addData("Shooter Intake", shooterIntake.getPower() > 0 ? "PULSING" : "STOPPED");
-                break;
-
-            case DRIVE_SHOOTPOSE_SECONDCYCLEINTAKEPREP:
-                shooter.setTarget(0);
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Driving to second intake prep");
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.SECOND_INTAKE_PREP);
-                }
-                break;
-
-            case SECOND_INTAKE_PREP:
-                shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Second intake prep - intake running");
-                follower.followPath(driveSecondIntakePrepSecondIntakeCollect, true);
-                setTransitionPathState(PathState.DRIVE_SECONDINTAKEPREP_SECONDINTAKECOLLECT);
-                break;
-
-            case DRIVE_SECONDINTAKEPREP_SECONDINTAKECOLLECT:
-                shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Driving to second intake collect");
-                telemetry.addData("Intake", "RUNNING");
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.SECOND_INTAKE_COLLECT);
-                }
-                break;
-
-            case SECOND_INTAKE_COLLECT:
-                shooterIntake.setPower(0);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Second collect done - returning to shooter");
-                follower.followPath(driveSecondIntakeCollectShootPos, true);
-                setTransitionPathState(PathState.DRIVE_SECONDINTAKECOLLECT_SHOOTPOSE);
-                break;
-
-            case DRIVE_SECONDINTAKECOLLECT_SHOOTPOSE:
-                shooter.setTarget(scaledShooterTarget());
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Returning to shooter (cycle2) - spinning up");
-                telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
-                if (!follower.isBusy()) {
-                    follower.followPath(alignToCitadel, true);
-                    setTransitionPathState(PathState.ALIGN_TO_CITADEL_CYCLE2);
-                }
-                break;
-
-            case ALIGN_TO_CITADEL_CYCLE2:
-                shooter.setTarget(scaledShooterTarget());
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Aligning to citadel (cycle 2)...");
-                telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.SHOOT_CYCLE2);
-                }
-                break;
-
-            case SHOOT_CYCLE2:
-                shooter.update();
-                double err2 = Math.abs(shooter.getError());
-                if (err2 <= 200.0 && !shootingComplete3) {
-                    shooterIntake.setPower(getShootingPulsePower());
-                    if (shootTimer3 == null) {
-                        shootTimer3 = new Timer();
-                        shootTimer3.resetTimer();
-                        startIntakePulse();
-                    }
-                    if (shootTimer3.getElapsedTimeSeconds() >= WAIT_AT_SHOOT_POSE) {
-                        shooterIntake.setPower(0);
-                        shooter.setTarget(0);
-                        shooter.update();
-                        shootingComplete3 = true;
-                        follower.followPath(driveShootPosThirdCycleIntakePrep, true);
-                        setTransitionPathState(PathState.DRIVE_SHOOTPOSE_THIRDCYCLEINTAKEPREP);
-                    } else {
-                        telemetry.addData("Cycle2 Timer", "%.1f / %.1f", shootTimer3.getElapsedTimeSeconds(), WAIT_AT_SHOOT_POSE);
-                    }
-                } else if (!shootingComplete3) {
-                    shooterIntake.setPower(0);
-                    telemetry.addData("Shooter Status", "Waiting for speed");
-                }
-                telemetry.addData("Shooter Error", "%.0f", err2);
-                telemetry.addData("Shooter Intake", shooterIntake.getPower() > 0 ? "PULSING" : "STOPPED");
-                break;
-
-            case DRIVE_SHOOTPOSE_THIRDCYCLEINTAKEPREP:
-                shooter.setTarget(0);
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Driving to third intake prep");
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.THIRD_INTAKE_PREP);
-                }
-                break;
-
-            case THIRD_INTAKE_PREP:
-                shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Third intake prep - intake running");
-                follower.followPath(driveThirdIntakePrepThirdIntakeCollect, true);
-                setTransitionPathState(PathState.DRIVE_THIRDINTAKEPREP_THIRDINTAKECOLLECT);
-                break;
-
-            case DRIVE_THIRDINTAKEPREP_THIRDINTAKECOLLECT:
-                shooterIntake.setPower(Constants.SHOOTER_INTAKE_POWER);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Driving to third intake collect");
-                telemetry.addData("Intake", "RUNNING");
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.THIRD_INTAKE_COLLECT);
-                }
-                break;
-
-            case THIRD_INTAKE_COLLECT:
-                shooterIntake.setPower(0);
-                shooter.setTarget(0);
-                shooter.update();
-                telemetry.addData("Status", "Third collect done - returning to shooter");
-                follower.followPath(driveThirdIntakeCollectShootPos, true);
-                setTransitionPathState(PathState.DRIVE_THIRDINTAKECOLLECT_SHOOTPOSE);
-                break;
-
-            case DRIVE_THIRDINTAKECOLLECT_SHOOTPOSE:
-                shooter.setTarget(scaledShooterTarget());
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Returning to shooter (cycle3) - spinning up");
-                telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
-                if (!follower.isBusy()) {
-                    follower.followPath(alignToCitadel, true);
-                    setTransitionPathState(PathState.ALIGN_TO_CITADEL_CYCLE3);
-                }
-                break;
-
-            case ALIGN_TO_CITADEL_CYCLE3:
-                shooter.setTarget(scaledShooterTarget());
-                shooter.update();
-                shooterIntake.setPower(0);
-                telemetry.addData("Status", "Aligning to citadel (cycle 3)...");
-                telemetry.addData("Shooter Error", "%.0f", Math.abs(shooter.getError()));
-                if (!follower.isBusy()) {
-                    setTransitionPathState(PathState.SHOOT_CYCLE3);
-                }
-                break;
-
-            case SHOOT_CYCLE3:
-                shooter.update();
-                double err3 = Math.abs(shooter.getError());
-                if (err3 <= 200.0 && !shootingComplete4) {
-                    shooterIntake.setPower(getShootingPulsePower());
-                    if (shootTimer4 == null) {
-                        shootTimer4 = new Timer();
-                        shootTimer4.resetTimer();
-                        startIntakePulse();
-                    }
-                    if (shootTimer4.getElapsedTimeSeconds() >= WAIT_AT_SHOOT_POSE) {
-                        shooterIntake.setPower(0);
-                        shooter.setTarget(0);
-                        shooter.update();
-                        shootingComplete4 = true;
-                        follower.followPath(driveShootPosEndPose, true);
-                        setTransitionPathState(PathState.DRIVE_TO_END_POSE);
-                    } else {
-                        telemetry.addData("Cycle3 Timer", "%.1f / %.1f", shootTimer4.getElapsedTimeSeconds(), WAIT_AT_SHOOT_POSE);
-                    }
-                } else if (!shootingComplete4) {
-                    shooterIntake.setPower(0);
-                    telemetry.addData("Shooter Status", "Waiting for speed");
-                }
-                telemetry.addData("Shooter Error", "%.0f", err3);
-                telemetry.addData("Shooter Intake", shooterIntake.getPower() > 0 ? "PULSING" : "STOPPED");
-                break;
-
             case DRIVE_TO_END_POSE:
+                // Drive to end position, rotating back to 90°
                 shooter.setTarget(0);
                 shooter.update();
                 shooterIntake.setPower(0);
-                telemetry.addData("Status", "Driving to end pose");
+                telemetry.addData("Status", "Driving to end pose (rotating to 90°)");
                 if (!follower.isBusy()) {
                     setTransitionPathState(PathState.END);
                 }
@@ -492,7 +169,6 @@ public class AutonomousBlueSubmissive extends OpMode {
                 break;
         }
     }
-
 
     public void setTransitionPathState(PathState newState){
         pathState = newState;

@@ -192,7 +192,7 @@ public class TeleOpRed extends OpMode {
             shooter.setTarget(Constants.SHOOTER_TARGET);
         }
         else if (gamepad1.right_bumper){
-            shooter.setTarget(Constants.SHOOTER_TARGET);
+            shooter.setTarget(-Constants.SHOOTER_TARGET);
         }
         else {
             shooter.setTarget(0);
