@@ -133,9 +133,14 @@ public class TeleOpBlue extends OpMode {
         rotate *= Constants.TURN_SENSITIVITY;
 
         // Apply slew rate limiting for smooth acceleration
+        // (twist limiter is bypassed during AprilTag alignment — PD controller manages smoothness itself)
         forward = driveLimiter.calculate(forward);
         strafe  = strafeLimiter.calculate(strafe);
-        rotate  = twistLimiter.calculate(rotate);
+        if (!aprilTagOn) {
+            rotate = twistLimiter.calculate(rotate);
+        } else {
+            twistLimiter.reset(); // keep limiter in sync so manual mode is smooth when toggling back
+        }
 
         // AprilTag toggle (A button rising edge)
         boolean aPressed = gamepad1.a;
@@ -143,6 +148,7 @@ public class TeleOpBlue extends OpMode {
             aprilTagOn = !aprilTagOn;
             lastError = 0;
             lastTime = getRuntime();
+            twistLimiter.reset(); // reset so stale limiter state doesn't fight PD output on first frame
         }
         aPreviouslyPressed = aPressed;
 
