@@ -201,7 +201,12 @@ public class TeleOpBlue extends OpMode {
         // ── Shooter: right trigger sets target velocity ──
         if (gamepad1.right_trigger > Constants.TRIGGER_DEADZONE) {
             shooter.setTarget(Constants.SHOOTER_TARGET);
-        } else {
+
+        }
+        else if (gamepad1.right_bumper){
+            shooter.setTarget(-Constants.SHOOTER_TARGET);
+        }
+        else {
             shooter.setTarget(0);
         }
         shooter.update();
