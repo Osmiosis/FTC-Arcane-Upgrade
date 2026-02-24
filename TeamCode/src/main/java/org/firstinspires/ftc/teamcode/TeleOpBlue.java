@@ -156,24 +156,19 @@ public class TeleOpBlue extends OpMode {
             }
         }
 
-        // Auto-align logic
+        // Auto-align logic (same as YouTube tutorial, bearing negated for rear-facing camera)
         if (aprilTagOn) {
             if (id20 != null) {
-                // Camera faces BACKWARD → negate bearing, then correct for camera offset from shooter centre
-                double rawBearing = -id20.ftcPose.bearing;
-                double tagX = id20.ftcPose.range * Math.sin(Math.toRadians(rawBearing)) + Constants.CAMERA_OFFSET_X;
-                double tagY = id20.ftcPose.range * Math.cos(Math.toRadians(rawBearing)) + Constants.CAMERA_OFFSET_Y;
-                double correctedBearing = Math.toDegrees(Math.atan2(tagX, tagY));
-                error = Constants.ALIGN_GOAL_BEARING - correctedBearing;
+                // Camera faces BACKWARD → negate bearing
+                error = Constants.ALIGN_GOAL_BEARING - (-id20.ftcPose.bearing);
 
                 if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
                     rotate = 0;
-                    lastError = 0;
                 } else {
                     double pTerm = error * Constants.ALIGN_KP;
                     curTime = getRuntime();
                     double dt = curTime - lastTime;
-                    double dTerm = (dt > 0) ? ((error - lastError) / dt) * Constants.ALIGN_KD : 0;
+                    double dTerm = ((error - lastError) / dt) * Constants.ALIGN_KD;
 
                     rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
 
@@ -181,14 +176,8 @@ public class TeleOpBlue extends OpMode {
                     lastTime = curTime;
                 }
             } else {
-                // Tag not visible — keep rotating using last known error so robot doesn't stop dead
-                if (Math.abs(lastError) > Constants.ALIGN_ANGLE_TOLERANCE) {
-                    rotate = Range.clip(lastError * Constants.ALIGN_KP, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
-                } else {
-                    rotate = 0;
-                    lastTime = getRuntime();
-                    lastError = 0;
-                }
+                lastTime = getRuntime();
+                lastError = 0;
             }
         } else {
             lastError = 0;
@@ -201,10 +190,9 @@ public class TeleOpBlue extends OpMode {
         // ── Shooter: right trigger sets target velocity ──
         if (gamepad1.right_trigger > Constants.TRIGGER_DEADZONE) {
             shooter.setTarget(Constants.SHOOTER_TARGET);
-
         }
         else if (gamepad1.right_bumper){
-            shooter.setTarget(-Constants.SHOOTER_TARGET);
+            shooter.setTarget(Constants.SHOOTER_TARGET);
         }
         else {
             shooter.setTarget(0);

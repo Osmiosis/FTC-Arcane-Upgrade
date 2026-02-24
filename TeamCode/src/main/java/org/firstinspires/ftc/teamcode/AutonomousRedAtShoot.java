@@ -128,82 +128,83 @@ public class AutonomousRedAtShoot extends OpMode {
 
     public void buildPaths() {
         // start -> shoot approach (constant 222°)
-        // Bot moves fast and settles loosely — shooter is already spinning up
         driveStartPosShootPos = follower.pathBuilder()
                 .addPath(new BezierLine(new Pose(123.235, 122.161), new Pose(95.388, 91.712)))
                 .setConstantHeadingInterpolation(Math.toRadians(222))
                 .build();
 
-        // citadel alignment nudge — short move to lock onto exact shoot pose facing the goal
-        // 222° = roughly facing the citadel on the red side. Adjust X/Y if still offset.
+        // citadel alignment nudge
         alignToCitadel = follower.pathBuilder()
                 .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(94.5, 93.0)))
                 .setConstantHeadingInterpolation(Math.toRadians(222))
                 .build();
 
         // shoot -> first intake prep (turn 222° -> 0°)
-        // Nudged Y from 83.512 -> 80.5, shifted X +3 to match other intake lines
+        // Y: 80.5 - 2.25 = 78.25
         driveShootPosFirstCycleIntakePrep = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(95.388, 80.5)))
+                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(95.388, 78.25)))
                 .setLinearHeadingInterpolation(Math.toRadians(222), Math.toRadians(0))
                 .build();
 
         // first intake prep -> first intake collect (constant 0°)
-        // Shifted both endpoints +3 inches on X to match 2nd and 3rd intake lines
+        // Y: 80.5 - 2.25 = 78.25
         driveIntakePrepIntakeCollect = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.388, 80.5), new Pose(132.0, 80.5)))
+                .addPath(new BezierLine(new Pose(95.388, 78.25), new Pose(132.0, 78.25)))
                 .setConstantHeadingInterpolation(Math.toRadians(0))
                 .build();
 
         // first intake collect -> shoot (turn 0° -> 222°)
+        // Y: 80.5 - 2.25 = 78.25
         driveIntakeCollectShootPos = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(132.0, 80.5), new Pose(95.388, 91.712)))
+                .addPath(new BezierLine(new Pose(132.0, 78.25), new Pose(95.388, 91.712)))
                 .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(222))
                 .build();
 
         // shoot -> second intake prep (turn 222° -> 0°)
-        // +3 inches on intake prep X to shift line deeper toward balls
+        // Y: 60.208 - 2.25 = 57.958
         driveShootPosSecondCycleIntakePrep = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(95.319, 60.208)))
+                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(95.319, 57.958)))
                 .setLinearHeadingInterpolation(Math.toRadians(222), Math.toRadians(0))
                 .build();
 
         // second intake prep -> second intake collect (constant 0°)
-        // +3 inches on both ends
+        // Y: 59.861 - 2.25 = 57.611
         driveSecondIntakePrepSecondIntakeCollect = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.319, 60.208), new Pose(128.726, 59.861)))
+                .addPath(new BezierLine(new Pose(95.319, 57.958), new Pose(128.726, 57.611)))
                 .setConstantHeadingInterpolation(Math.toRadians(0))
                 .build();
 
         // second intake collect -> shoot (turn 0° -> 222°)
+        // Y: 59.861 - 2.25 = 57.611
         driveSecondIntakeCollectShootPos = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(128.726, 59.861), new Pose(95.388, 91.712)))
+                .addPath(new BezierLine(new Pose(128.726, 57.611), new Pose(95.388, 91.712)))
                 .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(222))
                 .build();
 
         // shoot -> third intake prep (turn 222° -> 0°)
-        // +3 inches on intake prep X to shift line deeper toward balls
+        // Y: 35.640 - 2.25 = 33.390
         driveShootPosThirdCycleIntakePrep = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(95.368, 35.640)))
+                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(95.368, 33.390)))
                 .setLinearHeadingInterpolation(Math.toRadians(222), Math.toRadians(0))
                 .build();
 
         // third intake prep -> third intake collect (constant 0°)
-        // +3 inches on both ends
+        // Y: 35.557 - 2.25 = 33.307
         driveThirdIntakePrepThirdIntakeCollect = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.368, 35.640), new Pose(128.033, 35.557)))
+                .addPath(new BezierLine(new Pose(95.368, 33.390), new Pose(128.033, 33.307)))
                 .setConstantHeadingInterpolation(Math.toRadians(0))
                 .build();
 
         // third intake collect -> shoot (turn 0° -> 222°)
+        // Y: 35.557 - 2.25 = 33.307
         driveThirdIntakeCollectShootPos = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(128.033, 35.557), new Pose(95.388, 91.712)))
+                .addPath(new BezierLine(new Pose(128.033, 33.307), new Pose(95.388, 91.712)))
                 .setLinearHeadingInterpolation(Math.toRadians(0), Math.toRadians(222))
                 .build();
 
         // shoot -> end pose (constant 222°)
         driveShootPosEndPose = follower.pathBuilder()
-                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(84.939, 101.499)))
+                .addPath(new BezierLine(new Pose(95.388, 91.712), new Pose(109.69, 76.75)))
                 .setConstantHeadingInterpolation(Math.toRadians(222))
                 .build();
     }
@@ -242,7 +243,7 @@ public class AutonomousRedAtShoot extends OpMode {
                 double err0 = Math.abs(shooter.getError());
 
                 if (err0 <= 200.0 && !shootingComplete) {
-                    // ── SHOOTING PULSE: 3 pulses over 2s ──
+                    // ── SHOOTING PULSE: 3 pulses over 2.5s ──
                     shooterIntake.setPower(getShootingPulsePower());
                     if (shootTimer == null) {
                         shootTimer = new Timer();
@@ -336,7 +337,7 @@ public class AutonomousRedAtShoot extends OpMode {
                 double err1 = Math.abs(shooter.getError());
 
                 if (err1 <= 200.0 && !shootingComplete2) {
-                    // ── SHOOTING PULSE: 3 pulses over 2s ──
+                    // ── SHOOTING PULSE: 3 pulses over 2.5s ──
                     shooterIntake.setPower(getShootingPulsePower());
                     if (shootTimer2 == null) {
                         shootTimer2 = new Timer();
@@ -430,7 +431,7 @@ public class AutonomousRedAtShoot extends OpMode {
                 double err2 = Math.abs(shooter.getError());
 
                 if (err2 <= 200.0 && !shootingComplete3) {
-                    // ── SHOOTING PULSE: 3 pulses over 2s ──
+                    // ── SHOOTING PULSE: 3 pulses over 2.5s ──
                     shooterIntake.setPower(getShootingPulsePower());
                     if (shootTimer3 == null) {
                         shootTimer3 = new Timer();
@@ -523,7 +524,7 @@ public class AutonomousRedAtShoot extends OpMode {
                 shooter.update();
                 double err3 = Math.abs(shooter.getError());
                 if (err3 <= 200.0 && !shootingComplete4) {
-                    // ── SHOOTING PULSE: 3 pulses over 2s ──
+                    // ── SHOOTING PULSE: 3 pulses over 2.5s ──
                     shooterIntake.setPower(getShootingPulsePower());
                     if (shootTimer4 == null) {
                         shootTimer4 = new Timer();

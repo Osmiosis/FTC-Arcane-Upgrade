@@ -156,24 +156,19 @@ public class TeleOpRed extends OpMode {
             }
         }
 
-        // Auto-align logic
+        // Auto-align logic (same as YouTube tutorial, bearing negated for rear-facing camera)
         if (aprilTagOn) {
             if (id24 != null) {
-                // Camera faces BACKWARD → negate bearing, then correct for camera offset from shooter centre
-                double rawBearing = -id24.ftcPose.bearing;
-                double tagX = id24.ftcPose.range * Math.sin(Math.toRadians(rawBearing)) + Constants.CAMERA_OFFSET_X;
-                double tagY = id24.ftcPose.range * Math.cos(Math.toRadians(rawBearing)) + Constants.CAMERA_OFFSET_Y;
-                double correctedBearing = Math.toDegrees(Math.atan2(tagX, tagY));
-                error = Constants.ALIGN_GOAL_BEARING - correctedBearing;
+                // Camera faces BACKWARD → negate bearing
+                error = Constants.ALIGN_GOAL_BEARING - (-id24.ftcPose.bearing);
 
                 if (Math.abs(error) < Constants.ALIGN_ANGLE_TOLERANCE) {
                     rotate = 0;
-                    lastError = 0;
                 } else {
                     double pTerm = error * Constants.ALIGN_KP;
                     curTime = getRuntime();
                     double dt = curTime - lastTime;
-                    double dTerm = (dt > 0) ? ((error - lastError) / dt) * Constants.ALIGN_KD : 0;
+                    double dTerm = ((error - lastError) / dt) * Constants.ALIGN_KD;
 
                     rotate = Range.clip(pTerm + dTerm, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
 
@@ -181,15 +176,8 @@ public class TeleOpRed extends OpMode {
                     lastTime = curTime;
                 }
             } else {
-                // Tag not visible — if we had a last known error, keep rotating toward where the tag was.
-                // This prevents the robot from stopping dead while the camera catches up.
-                if (Math.abs(lastError) > Constants.ALIGN_ANGLE_TOLERANCE) {
-                    rotate = Range.clip(lastError * Constants.ALIGN_KP, -Constants.ALIGN_MAX_ROTATE, Constants.ALIGN_MAX_ROTATE);
-                } else {
-                    rotate = 0;
-                    lastTime = getRuntime();
-                    lastError = 0;
-                }
+                lastTime = getRuntime();
+                lastError = 0;
             }
         } else {
             lastError = 0;
@@ -204,7 +192,7 @@ public class TeleOpRed extends OpMode {
             shooter.setTarget(Constants.SHOOTER_TARGET);
         }
         else if (gamepad1.right_bumper){
-            shooter.setTarget(-Constants.SHOOTER_TARGET);
+            shooter.setTarget(Constants.SHOOTER_TARGET);
         }
         else {
             shooter.setTarget(0);
